@@ -1,0 +1,12 @@
+{
+  "name": "doska",
+  "version": "1.0.0",
+  "description": "Бесконечная доска для онлайн-занятий: рукописный ввод и синхронизация в реальном времени",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": { "ws": "^8.18.0" }
+}
