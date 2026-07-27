@@ -29,9 +29,36 @@ const MAX_UPLOAD  = 16 * 1024 * 1024;      // 16 МБ на картинку
 const SAVE_EVERY  = 4000;
 const IDLE_UNLOAD = 30 * 60 * 1000;
 
+// общий с mcko-app Supabase-проект — используется только как поставщик
+// личности учителя (см. README, раздел "Вход учителя"), не как БД для доски
+const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
+const USER_CACHE_TTL = 60 * 1000;
+const userCache = new Map(); // access token -> { user, expires }
+
+/* Проверяет Supabase access-токен через /auth/v1/user, кэширует результат на
+   минуту, чтобы не дёргать Supabase на каждое WS-сообщение. Возвращает
+   {id, email} проверенного пользователя или null (в т.ч. если проект не
+   настроен через переменные окружения — тогда роль учителя недоступна). */
+async function verifySupabaseUser(token) {
+  if (!token || typeof token !== 'string' || !SUPABASE_URL || !SUPABASE_ANON_KEY) return null;
+  const cached = userCache.get(token);
+  if (cached && cached.expires > Date.now()) return cached.user;
+  try {
+    const r = await fetch(SUPABASE_URL + '/auth/v1/user', {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + token }
+    });
+    if (!r.ok) return null;
+    const data = await r.json();
+    if (!data || !data.id) return null;
+    const user = { id: data.id, email: data.email || null };
+    userCache.set(token, { user, expires: Date.now() + USER_CACHE_TTL });
+    return user;
+  } catch { return null; }
+}
+
 /* ═══════════════ вспомогательное ═══════════════ */
 const okId    = s => /^[a-zA-Z0-9_-]{1,40}$/.test(s);
-const okToken = s => typeof s === 'string' && /^[a-zA-Z0-9_-]{16,64}$/.test(s);
 const rnd     = n => crypto.randomBytes(n * 2).toString('base64url').slice(0, n);
 const boardFile = id => path.join(DIR.boards, id + '.json');
 const indexFile = tk => path.join(DIR.index, crypto.createHash('sha256').update(tk).digest('hex') + '.json');
@@ -69,7 +96,7 @@ async function loadRoom(id) {
     id,
     title: (saved && saved.title) || 'Без названия',
     items: (saved && Array.isArray(saved.items)) ? saved.items : [],
-    teacherKey: (saved && saved.teacherKey) || null,
+    ownerId: (saved && saved.ownerId) || null,
     locked: !!(saved && saved.locked),
     clients: new Set(), dirty: false, touched: Date.now()
   };
@@ -78,7 +105,7 @@ async function loadRoom(id) {
 }
 function persist(r) {
   r.dirty = false;
-  writeJson(boardFile(r.id), { v: 2, title: r.title, teacherKey: r.teacherKey, locked: r.locked, items: r.items })
+  writeJson(boardFile(r.id), { v: 3, title: r.title, ownerId: r.ownerId, locked: r.locked, items: r.items })
     .catch(e => console.error('save', r.id, e.message));
 }
 setInterval(() => {
@@ -111,35 +138,38 @@ const IMAGE_EXT = { 'image/png':'.png','image/jpeg':'.jpg','image/webp':'.webp',
 
 const api = {
   async list(b) {
-    if (!okToken(b.token)) return [400, { error: 'плохой токен' }];
-    const idx = await readJson(indexFile(b.token), { boards: [] });
+    const user = await verifySupabaseUser(b.token);
+    if (!user) return [401, { error: 'не авторизовано' }];
+    const idx = await readJson(indexFile(user.id), { boards: [] });
     return [200, { boards: idx.boards }];
   },
 
   async create(b) {
-    if (!okToken(b.token)) return [400, { error: 'плохой токен' }];
-    const idx = await readJson(indexFile(b.token), { boards: [] });
+    const user = await verifySupabaseUser(b.token);
+    if (!user) return [401, { error: 'не авторизовано' }];
+    const idx = await readJson(indexFile(user.id), { boards: [] });
     if (idx.boards.length >= 500) return [400, { error: 'слишком много досок' }];
     const board = {
-      id: 'b' + rnd(10), key: rnd(24),
+      id: 'b' + rnd(10),
       title: String(b.title || '').trim().slice(0, 80) || 'Новая доска',
       created: Date.now(), updated: Date.now()
     };
     idx.boards.unshift(board);
-    await writeJson(indexFile(b.token), idx);
+    await writeJson(indexFile(user.id), idx);
     const r = await loadRoom(board.id);
-    r.teacherKey = board.key; r.title = board.title; persist(r);
+    r.ownerId = user.id; r.title = board.title; persist(r);
     return [200, { board }];
   },
 
   async rename(b) {
-    if (!okToken(b.token) || !okId(String(b.id || ''))) return [400, { error: 'плохие данные' }];
-    const idx = await readJson(indexFile(b.token), { boards: [] });
+    const user = await verifySupabaseUser(b.token);
+    if (!user || !okId(String(b.id || ''))) return [400, { error: 'плохие данные' }];
+    const idx = await readJson(indexFile(user.id), { boards: [] });
     const rec = idx.boards.find(x => x.id === b.id);
     if (!rec) return [404, { error: 'доска не найдена' }];
     rec.title = String(b.title || '').trim().slice(0, 80) || rec.title;
     rec.updated = Date.now();
-    await writeJson(indexFile(b.token), idx);
+    await writeJson(indexFile(user.id), idx);
     const r = await loadRoom(b.id);
     r.title = rec.title; r.dirty = true;
     broadcast(r, { t: 'title', title: rec.title });
@@ -147,12 +177,13 @@ const api = {
   },
 
   async remove(b) {
-    if (!okToken(b.token) || !okId(String(b.id || ''))) return [400, { error: 'плохие данные' }];
-    const idx = await readJson(indexFile(b.token), { boards: [] });
+    const user = await verifySupabaseUser(b.token);
+    if (!user || !okId(String(b.id || ''))) return [400, { error: 'плохие данные' }];
+    const idx = await readJson(indexFile(user.id), { boards: [] });
     const i = idx.boards.findIndex(x => x.id === b.id);
     if (i < 0) return [404, { error: 'доска не найдена' }];
     idx.boards.splice(i, 1);
-    await writeJson(indexFile(b.token), idx);
+    await writeJson(indexFile(user.id), idx);
     const r = rooms.get(b.id);
     if (r) { for (const c of r.clients) c.close(4004, 'доска удалена'); rooms.delete(b.id); }
     await fsp.unlink(boardFile(b.id)).catch(() => {});
@@ -178,15 +209,17 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return reply(res, 400, { error: e.message }); }
   }
 
-  /* --- загрузка картинки: POST /api/upload?board=ID&key=KEY --- */
+  /* --- загрузка картинки: POST /api/upload?board=ID&token=SUPABASE_JWT --- */
   if (p === '/api/upload') {
     if (req.method !== 'POST') return reply(res, 405, { error: 'нужен POST' });
     const id = url.searchParams.get('board') || '';
     if (!okId(id)) return reply(res, 400, { error: 'плохой id доски' });
     const room = rooms.get(id);
     if (!room) return reply(res, 404, { error: 'доска не открыта' });
-    if (room.locked && url.searchParams.get('key') !== room.teacherKey)
-      return reply(res, 403, { error: 'доска закрыта преподавателем' });
+    if (room.locked) {
+      const user = await verifySupabaseUser(url.searchParams.get('token'));
+      if (!user || user.id !== room.ownerId) return reply(res, 403, { error: 'доска закрыта преподавателем' });
+    }
     const type = (req.headers['content-type'] || '').split(';')[0].trim();
     const ext = IMAGE_EXT[type];
     if (!ext) return reply(res, 415, { error: 'поддерживаются PNG, JPEG, WebP, GIF' });
@@ -248,7 +281,8 @@ function cleanStroke(s, by) {
   return { id: String(s.id).slice(0, 48), by, type: s.type === 'marker' ? 'marker' : 'pen',
            color: String(s.color || '#1A1C20').slice(0, 24),
            size: Math.min(600, Math.max(0.2, +s.size || 2)),
-           pts: s.pts.slice(0, 12000).map(a => [+a[0] || 0, +a[1] || 0, Math.max(0, Math.min(1, +a[2] || 0.5))]) };
+           pts: s.pts.slice(0, 12000).map(a => [+a[0] || 0, +a[1] || 0, Math.max(0, Math.min(1, +a[2] || 0.5))]),
+           locked: !!s.locked };
 }
 function cleanImage(im, by) {
   if (typeof im.url !== 'string' || !im.url.startsWith('/files/')) return null;
@@ -256,8 +290,102 @@ function cleanImage(im, by) {
   return { id: String(im.id).slice(0, 48), by, type: 'image', url: im.url.slice(0, 200),
            x: num(im.x, 0), y: num(im.y, 0),
            w: Math.max(4, Math.min(40000, num(im.w, 200))),
-           h: Math.max(4, Math.min(40000, num(im.h, 200))) };
+           h: Math.max(4, Math.min(40000, num(im.h, 200))),
+           rot: num(im.rot, 0),
+           locked: !!im.locked };
 }
+
+/* общие поля стиля для фигур/линий (цвет, толщина, дэш, заливка) */
+function cleanStyle(o) {
+  return {
+    color: String(o.color || '#1A1C20').slice(0, 24),
+    size: Math.min(600, Math.max(0.1, +o.size || 2)),
+    dash: [0, 1, 2].includes(+o.dash) ? +o.dash : 0,
+    fill: typeof o.fill === 'string' ? o.fill.slice(0, 24) : null
+  };
+}
+function cleanShape(s, by) {
+  if (s.kind !== 'rect' && s.kind !== 'ellipse') return null;
+  const num = (v, d) => Number.isFinite(+v) ? +v : d;
+  return { id: String(s.id).slice(0, 48), by, type: 'shape', kind: s.kind,
+           x: num(s.x, 0), y: num(s.y, 0),
+           w: Math.max(0.5, Math.min(40000, num(s.w, 100))),
+           h: Math.max(0.5, Math.min(40000, num(s.h, 100))),
+           rot: num(s.rot, 0),
+           locked: !!s.locked,
+           ...cleanStyle(s) };
+}
+const clampArrow = v => [0, 1, 2, 3].includes(+v) ? +v : 0;
+function cleanPath(p, by) {
+  if (!['line', 'polyline', 'curve', 'polygon'].includes(p.kind)) return null;
+  if (!Array.isArray(p.pts)) return null;
+  const minPts = p.kind === 'polygon' ? 3 : 2;
+  const pts = p.pts.slice(0, 2000).map(a => [+a[0] || 0, +a[1] || 0]);
+  if (pts.length < minPts) return null;
+  return { id: String(p.id).slice(0, 48), by, type: 'path', kind: p.kind,
+           pts, closed: p.kind === 'polygon',
+           a1: clampArrow(p.a1), a2: clampArrow(p.a2),
+           locked: !!p.locked,
+           ...cleanStyle(p) };
+}
+
+/* реестр валидаторов по типу — новый тип регистрируется здесь один раз,
+   вместо тернарника в add/restore. Незарегистрированный тип (штрихи,
+   а также будущие типы до появления своего cleaner'а) идёт через cleanStroke. */
+const CLEANERS = { image: cleanImage, shape: cleanShape, path: cleanPath };
+const pick = type => CLEANERS[type] || cleanStroke;
+
+/* PATCHABLE[type] — какие поля можно менять через 'move'; PATCH_CLAMP[type][key] —
+   как провалидировать/зажать присланное значение (get текущее it для отката). */
+const clampPts = (v, it) => {
+  if (!Array.isArray(v) || !v.length) return it.pts;
+  return v.slice(0, 12000).map(a => [+a[0] || 0, +a[1] || 0, Math.max(0, Math.min(1, +a[2] || 0.5))]);
+};
+const PATCH_CLAMP = {
+  image: {
+    x: (v, it) => Number.isFinite(+v) ? +v : it.x,
+    y: (v, it) => Number.isFinite(+v) ? +v : it.y,
+    w: (v, it) => Math.max(4, Math.min(40000, Number.isFinite(+v) ? +v : it.w)),
+    h: (v, it) => Math.max(4, Math.min(40000, Number.isFinite(+v) ? +v : it.h)),
+    rot: (v, it) => Number.isFinite(+v) ? +v : it.rot,
+    locked: (v) => !!v
+  },
+  pen: {
+    pts: clampPts,
+    color: (v, it) => typeof v === 'string' ? v.slice(0, 24) : it.color,
+    size: (v, it) => Number.isFinite(+v) ? Math.min(600, Math.max(0.2, +v)) : it.size,
+    locked: (v) => !!v
+  },
+  shape: {
+    x: (v, it) => Number.isFinite(+v) ? +v : it.x,
+    y: (v, it) => Number.isFinite(+v) ? +v : it.y,
+    w: (v, it) => Math.max(0.5, Math.min(40000, Number.isFinite(+v) ? +v : it.w)),
+    h: (v, it) => Math.max(0.5, Math.min(40000, Number.isFinite(+v) ? +v : it.h)),
+    rot: (v, it) => Number.isFinite(+v) ? +v : it.rot,
+    color: (v, it) => typeof v === 'string' ? v.slice(0, 24) : it.color,
+    size: (v, it) => Number.isFinite(+v) ? Math.min(600, Math.max(0.1, +v)) : it.size,
+    dash: (v, it) => [0, 1, 2].includes(+v) ? +v : it.dash,
+    fill: (v, it) => v === null ? null : (typeof v === 'string' ? v.slice(0, 24) : it.fill),
+    locked: (v) => !!v
+  },
+  path: {
+    pts: (v, it) => {
+      if (!Array.isArray(v)) return it.pts;
+      const minPts = it.kind === 'polygon' ? 3 : 2;
+      const pts = v.slice(0, 2000).map(a => [+a[0] || 0, +a[1] || 0]);
+      return pts.length >= minPts ? pts : it.pts;
+    },
+    color: (v, it) => typeof v === 'string' ? v.slice(0, 24) : it.color,
+    size: (v, it) => Number.isFinite(+v) ? Math.min(600, Math.max(0.1, +v)) : it.size,
+    dash: (v, it) => [0, 1, 2].includes(+v) ? +v : it.dash,
+    fill: (v, it) => v === null ? null : (typeof v === 'string' ? v.slice(0, 24) : it.fill),
+    a1: (v, it) => [0, 1, 2, 3].includes(+v) ? +v : it.a1,
+    a2: (v, it) => [0, 1, 2, 3].includes(+v) ? +v : it.a2,
+    locked: (v) => !!v
+  }
+};
+PATCH_CLAMP.marker = PATCH_CLAMP.pen;
+const PATCHABLE = Object.fromEntries(Object.entries(PATCH_CLAMP).map(([t, c]) => [t, Object.keys(c)]));
 
 wss.on('connection', ws => {
   ws.isAlive = true;
@@ -274,9 +402,20 @@ wss.on('connection', ws => {
       const room = await loadRoom(String(m.room));
       ws.room = room;
       ws.me.name = String(m.name || 'Гость').trim().slice(0, 24) || 'Гость';
-      const key = typeof m.key === 'string' ? m.key.slice(0, 64) : '';
-      if (!room.teacherKey && key) { room.teacherKey = key; room.dirty = true; }
-      ws.me.role = key && key === room.teacherKey ? 'teacher' : 'student';
+      // роль проверяется один раз при подключении, не на каждое сообщение —
+      // как и раньше, доска не переаутентифицирует середину сессии
+      const token = typeof m.token === 'string' ? m.token.slice(0, 4096) : '';
+      let role = 'student';
+      if (token) {
+        const user = await verifySupabaseUser(token);
+        if (user) {
+          // доска без владельца (например, созданная до этой миграции) —
+          // первый вошедший с валидным токеном закрепляется как учитель
+          if (!room.ownerId) { room.ownerId = user.id; room.dirty = true; }
+          if (user.id === room.ownerId) role = 'teacher';
+        }
+      }
+      ws.me.role = role;
       room.clients.add(ws); room.touched = Date.now();
       send(ws, { t: 'init', you: peerInfo(ws), title: room.title, locked: room.locked,
                  peers: [...room.clients].filter(c => c !== ws).map(peerInfo), items: room.items });
@@ -302,7 +441,7 @@ wss.on('connection', ws => {
       case 'add': {
         if (!mayEdit) return;
         const src = m.item || {};
-        const it = src.type === 'image' ? cleanImage(src, ws.me.id) : cleanStroke(src, ws.me.id);
+        const it = pick(src.type)(src, ws.me.id);
         if (!it || room.items.some(x => x.id === it.id)) return;
         room.items.push(it);
         if (room.items.length > MAX_ITEMS) room.items.splice(0, 2000);
@@ -313,14 +452,24 @@ wss.on('connection', ws => {
 
       case 'move': {
         if (!mayEdit) return;
-        const it = room.items.find(x => x.id === m.id && x.type === 'image');
+        const it = room.items.find(x => x.id === m.id);
         if (!it || !mine(it)) return;
-        const num = (v, d) => Number.isFinite(+v) ? +v : d;
-        it.x = num(m.x, it.x); it.y = num(m.y, it.y);
-        it.w = Math.max(4, Math.min(40000, num(m.w, it.w)));
-        it.h = Math.max(4, Math.min(40000, num(m.h, it.h)));
+        const allowed = PATCHABLE[it.type];
+        if (!allowed) return;
+        const clamp = PATCH_CLAMP[it.type];
+        const wasLocked = !!it.locked;
+        const applied = {};
+        for (const k of allowed) {
+          if (!(k in m)) continue;
+          // заблокированный объект принимает только снятие замка — остальные
+          // поля патча отбрасываются, иначе изменённый клиент мог бы игнорировать lock
+          if (wasLocked && k !== 'locked') continue;
+          applied[k] = clamp[k](m[k], it);
+        }
+        if (!Object.keys(applied).length) return;
+        Object.assign(it, applied);
         room.dirty = true;
-        broadcast(room, { t: 'move', id: it.id, x: it.x, y: it.y, w: it.w, h: it.h }, ws);
+        broadcast(room, { t: 'move', id: it.id, ...applied }, ws);
         return;
       }
 
@@ -329,7 +478,7 @@ wss.on('connection', ws => {
         const ids = new Set((m.ids || []).slice(0, 5000).map(String));
         const gone = [];
         room.items = room.items.filter(it => {
-          if (!ids.has(it.id) || !mine(it)) return true;
+          if (!ids.has(it.id) || !mine(it) || it.locked) return true;
           gone.push(it.id); return false;
         });
         if (!gone.length) return;
@@ -342,7 +491,7 @@ wss.on('connection', ws => {
         if (!mayEdit || !Array.isArray(m.items)) return;
         const back = [];
         for (const src of m.items.slice(0, 800)) {
-          const it = src.type === 'image' ? cleanImage(src, ws.me.id) : cleanStroke(src, ws.me.id);
+          const it = pick(src.type)(src, ws.me.id);
           if (it && !room.items.some(x => x.id === it.id)) { room.items.push(it); back.push(it); }
         }
         if (!back.length) return;

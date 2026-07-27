@@ -22,7 +22,9 @@
 
   .dock{position:fixed;left:14px;top:50%;transform:translateY(-50%);background:var(--panel);
     border:1px solid var(--edge);border-radius:var(--r);padding:8px;display:flex;flex-direction:column;
-    gap:6px;box-shadow:0 14px 40px rgba(15,17,20,.28);z-index:10;user-select:none}
+    gap:6px;box-shadow:0 14px 40px rgba(15,17,20,.28);z-index:10;user-select:none;
+    max-height:calc(100vh - 24px);overflow-y:auto;scrollbar-width:none}
+  .dock::-webkit-scrollbar{display:none}
   .tool{width:42px;height:42px;border:0;border-radius:10px;background:transparent;color:var(--muted);
     display:grid;place-items:center;cursor:pointer;transition:background .13s,color .13s}
   .tool:hover{background:var(--panel-2);color:var(--text)}
@@ -131,13 +133,12 @@
     </div>
     <div class="drow">
       <button class="btn" id="newBoard">Новая доска</button>
-      <button class="btn sec" id="showToken">Ключ доступа</button>
     </div>
     <div class="grid" id="boardGrid"></div>
     <div class="note" id="dashNote">
-      <b>Как это работает.</b> Список досок привязан к ключу доступа, который хранится в этом браузере.
-      Чтобы открыть те же доски на планшете, нажмите «Ключ доступа», скопируйте его и введите на другом
-      устройстве. Ученикам ключ не нужен и давать его нельзя — им отправляется только ссылка на доску.
+      <b>Как это работает.</b> Список досок привязан к вашему аккаунту преподавателя.
+      Откройте доску из личного кабинета на mcko-app — вход туда же откроет те же доски
+      на любом устройстве. Ученикам вход не нужен — им отправляется только ссылка на доску.
     </div>
   </div>
 </section>
@@ -152,8 +153,14 @@
   <button class="tool on" data-tool="pen" title="Карандаш (1)"><svg viewBox="0 0 24 24"><path d="M4 20l4-1 10-10a2.5 2.5 0 0 0-3.5-3.5L4.5 15.5 4 20z"/><path d="M13.5 6.5l4 4"/></svg></button>
   <button class="tool" data-tool="marker" title="Маркер (2)"><svg viewBox="0 0 24 24"><path d="M9 15l-3 3v2h4l3-3"/><path d="M12 17L7 12l8-8a2.8 2.8 0 0 1 4 4l-7 9z"/></svg></button>
   <button class="tool" data-tool="eraser" title="Ластик (3)"><svg viewBox="0 0 24 24"><path d="M8 20h12"/><path d="M15.5 4.5l4 4a2 2 0 0 1 0 2.8L12 19H8l-3.5-3.5a2 2 0 0 1 0-2.8l8.2-8.2a2 2 0 0 1 2.8 0z"/></svg></button>
-  <button class="tool" data-tool="select" title="Выделить картинку (4)"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.5L10.5 19 5 3z"/></svg></button>
+  <button class="tool" data-tool="select" title="Выделить (4)"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.5L10.5 19 5 3z"/></svg></button>
   <button class="tool" data-tool="hand" title="Рука (5 / пробел)"><svg viewBox="0 0 24 24"><path d="M8 12V5.5a1.5 1.5 0 0 1 3 0V11m0-.5V4.5a1.5 1.5 0 0 1 3 0V11m0-.5v-1a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-2.7L4.6 15a1.6 1.6 0 0 1 2.6-1.8L8 14.5"/></svg></button>
+  <button class="tool" data-shape="rect" title="Прямоугольник (R)"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1.5"/></svg></button>
+  <button class="tool" data-shape="ellipse" title="Эллипс (O)"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="8" ry="6"/></svg></button>
+  <button class="tool" data-path="line" title="Линия (L), стрелка — A"><svg viewBox="0 0 24 24"><path d="M4 20L20 4"/></svg></button>
+  <button class="tool" data-path="polyline" title="Ломаная (N)"><svg viewBox="0 0 24 24"><path d="M4 18l6-10 4 6 6-10"/></svg></button>
+  <button class="tool" data-path="curve" title="Кривая (C)"><svg viewBox="0 0 24 24"><path d="M4 18Q10 4 12 12T20 6"/></svg></button>
+  <button class="tool" data-path="polygon" title="Многоугольник (M)"><svg viewBox="0 0 24 24"><path d="M12 3l8 6-3 10H7L4 9z"/></svg></button>
   <div class="sep"></div>
   <button class="tool" id="undo" title="Отменить (Ctrl+Z)"><svg viewBox="0 0 24 24"><path d="M4 10h10a5 5 0 0 1 0 10h-4"/><path d="M8 6l-4 4 4 4"/></svg></button>
   <button class="tool" id="redo" title="Вернуть (Ctrl+Shift+Z)"><svg viewBox="0 0 24 24"><path d="M20 10H10a5 5 0 0 0 0 10h4"/><path d="M16 6l4 4-4 4"/></svg></button>
@@ -170,6 +177,24 @@
   <div><div class="label" style="margin-bottom:7px">Цвет</div><div class="inks" id="inks"></div></div>
   <div><div class="label" style="margin-bottom:5px">Толщина <span id="sizeVal" style="color:var(--text)">4</span></div>
     <input type="range" id="size" min="1" max="40" step="0.5" value="4"></div>
+  <div id="fillRow" class="hidden"><div class="label" style="margin-bottom:7px">Заливка</div><div class="inks" id="fills"></div></div>
+  <div id="dashRow" class="hidden"><div class="label" style="margin-bottom:7px">Линия</div>
+    <div style="display:flex;gap:6px">
+      <button class="mini" data-dash="0" title="Сплошная" style="flex:1">━━</button>
+      <button class="mini" data-dash="1" title="Пунктир" style="flex:1">╌╌</button>
+      <button class="mini" data-dash="2" title="Точки" style="flex:1">••</button>
+    </div>
+  </div>
+  <div id="arrowRow" class="hidden"><div class="label" style="margin-bottom:7px">Стрелки</div>
+    <div style="display:flex;gap:6px">
+      <select id="a1Sel" style="flex:1;background:var(--panel-2);color:var(--text);border:1px solid var(--edge);border-radius:6px;padding:4px">
+        <option value="0">начало: нет</option><option value="1">уголок</option><option value="2">треугольник</option><option value="3">точка</option>
+      </select>
+      <select id="a2Sel" style="flex:1;background:var(--panel-2);color:var(--text);border:1px solid var(--edge);border-radius:6px;padding:4px">
+        <option value="0">конец: нет</option><option value="1">уголок</option><option value="2">треугольник</option><option value="3">точка</option>
+      </select>
+    </div>
+  </div>
 </div>
 
 <div class="top hidden" id="topBar">
@@ -191,7 +216,9 @@
 </div>
 
 <div class="selbar card" id="selbar">
-  <button class="mini" id="selDel">Удалить картинку</button>
+  <button class="mini" id="selDup" title="Дублировать (Ctrl+D)">Дублировать</button>
+  <button class="mini" id="selLock" title="Заблокировать позицию">Заблокировать</button>
+  <button class="mini" id="selDel">Удалить</button>
 </div>
 
 <div class="hint hidden" id="hint"></div>
@@ -205,13 +232,11 @@ const store={
   get(k){try{return localStorage.getItem(k);}catch{return null;}},
   set(k,v){try{localStorage.setItem(k,v);}catch{}},
 };
-const rnd=n=>Array.from(crypto.getRandomValues(new Uint8Array(n)))
-  .map(b=>'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'[b%56]).join('');
-
-function token(){
-  let t=store.get('doska.token');
-  if(!t||!/^[a-zA-Z0-9_-]{16,64}$/.test(t)){t=rnd(32);store.set('doska.token',t);}
-  return t;
+/* Supabase access-токен учителя — приходит из mcko-app через #token= при
+   переходе на доску (см. route()), живёт в sessionStorage (не localStorage:
+   токен разовый, не должен переживать закрытие вкладки/устройства). */
+function authToken(){
+  try{return sessionStorage.getItem('doska.authToken')||'';}catch{return '';}
 }
 async function api(method,body){
   const r=await fetch('/api/boards/'+method,{method:'POST',
@@ -225,7 +250,9 @@ async function api(method,body){
 const PAPER='#F7F5F0';
 const PENS=['#1A1C20','#24468C','#B3322B','#2E6B47','#6B3FA0'];
 const MARKERS=['#F2D33C','#7ED9C4','#F79BB0','#9DC5F5','#C9E36B'];
+const FILLS=[null,'#F2D33C','#7ED9C4','#F79BB0','#9DC5F5','#C9E36B'];
 const STREAMLINE=0.42;
+const STYLED=new Set(['pen','marker','shape','path']);
 
 const stage=document.getElementById('stage');
 const board=document.getElementById('board'), live=document.getElementById('live');
@@ -238,7 +265,8 @@ const GRID_NAMES={grid:'клетка',dots:'точки',lines:'линейка',n
 const S={tool:'pen',size:4,color:PENS[0],penColor:PENS[0],markerColor:MARKERS[0],
   cam:{x:0,y:0,z:1},grid:store.get('doska.grid')||'grid',
   locked:false,role:'student',me:null,following:false,
-  boardId:null,boardKey:'',name:store.get('doska.name')||''};
+  boardId:null,name:store.get('doska.name')||'',
+  shapeKind:'rect',fill:null,dash:0,pathKind:'line',a1:0,a2:0};
 
 let items=[];                       // всё содержимое доски (линии и картинки)
 const byId=new Map();
@@ -247,7 +275,7 @@ let history=[], redoStack=[];
 const toWorld=(sx,sy)=>({x:(sx-S.cam.x)/S.cam.z, y:(sy-S.cam.y)/S.cam.z});
 const toScreen=(wx,wy)=>({x:wx*S.cam.z+S.cam.x, y:wy*S.cam.z+S.cam.y});
 
-const mkStroke=(type,color,size,id,by)=>({id,by,type,color,size,pts:[],bbox:null});
+const mkStroke=(type,color,size,id,by)=>({id,by,type,color,size,pts:[],bbox:null,locked:false});
 
 function pushPoint(s,wx,wy,p){
   const pts=s.pts;
@@ -309,11 +337,170 @@ function paintStroke(ctx,s){
   if(s.type==='marker'){ctx.globalAlpha=0.42;ctx.globalCompositeOperation='multiply';}
   ctx.fillStyle=s.color; outlinePath(ctx,s); ctx.fill(); ctx.restore();
 }
+
+/* ═══ типовые реестры: новый тип объекта подключается сюда, не хирургией по всему файлу ═══ */
+// box-семейство — геометрия x,y,w,h(+rot); embed зарезервирован под будущий график (не реализован)
+const BOX_TYPES=new Set(['image','shape','embed']);
+// back-слой — всегда рисуется под рукописным текстом, независимо от порядка добавления
+// (фигуры сюда не входят — они в общем z-порядке наравне со штрихами)
+const BACK_TYPES=new Set(['image','embed']);
+// кто сейчас реально выделяем инструментом "выделить"
+const SELECTABLE=new Set(['image','pen','marker','shape','path']);
+
+/* поворот вокруг локального центра (cx,cy) на угол a — общая мини-утилита */
+function rotAround(px,py,cx,cy,a){
+  const cos=Math.cos(a),sin=Math.sin(a),dx=px-cx,dy=py-cy;
+  return {x:cx+dx*cos-dy*sin, y:cy+dx*sin+dy*cos};
+}
+
 function bboxOf(it){
-  if(it.type==='image')return{x0:it.x,y0:it.y,x1:it.x+it.w,y1:it.y+it.h};
+  if(BOX_TYPES.has(it.type)){
+    const rot=it.rot||0;
+    if(!rot)return{x0:it.x,y0:it.y,x1:it.x+it.w,y1:it.y+it.h};
+    // повёрнутый прямоугольник — берём AABB его 4 углов (шире исходного)
+    const cx=it.x+it.w/2, cy=it.y+it.h/2;
+    let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
+    for(const [px,py] of [[it.x,it.y],[it.x+it.w,it.y],[it.x,it.y+it.h],[it.x+it.w,it.y+it.h]]){
+      const p=rotAround(px,py,cx,cy,rot);
+      if(p.x<x0)x0=p.x;if(p.y<y0)y0=p.y;if(p.x>x1)x1=p.x;if(p.y>y1)y1=p.y;
+    }
+    return{x0,y0,x1,y1};
+  }
+  if(!Array.isArray(it.pts)||!it.pts.length)return{x0:0,y0:0,x1:0,y1:0};
   let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
   for(const p of it.pts){if(p.x<x0)x0=p.x;if(p.y<y0)y0=p.y;if(p.x>x1)x1=p.x;if(p.y>y1)y1=p.y;}
-  const m=it.size;return{x0:x0-m,y0:y0-m,x1:x1+m,y1:y1+m};
+  // у линии с наконечником запас должен покрывать стрелку (см. drawArrowhead),
+  // иначе кончик стрелки обрежется при culling/экспорте по краю видимой области
+  const arrow=(it.type==='path'&&(it.a1||it.a2))?Math.max(6,(it.size||0)*3):0;
+  const m=(it.size||0)+arrow;
+  return{x0:x0-m,y0:y0-m,x1:x1+m,y1:y1+m};
+}
+
+/* прямоугольник/эллипс — заливка, затем обводка; дэш в мировых единицах,
+   чтобы паттерн масштабировался вместе с толщиной линии при зуме */
+function paintShape(ctx,it){
+  const rot=it.rot||0;
+  ctx.save();
+  if(rot){const cx=it.x+it.w/2,cy=it.y+it.h/2;ctx.translate(cx,cy);ctx.rotate(rot);ctx.translate(-cx,-cy);}
+  ctx.beginPath();
+  if(it.kind==='ellipse')ctx.ellipse(it.x+it.w/2,it.y+it.h/2,Math.max(0.01,it.w/2),Math.max(0.01,it.h/2),0,0,6.2832);
+  else ctx.rect(it.x,it.y,it.w,it.h);
+  if(it.fill){ctx.fillStyle=it.fill;ctx.fill();}
+  if(it.size>0){
+    ctx.lineWidth=it.size;ctx.strokeStyle=it.color;
+    if(it.dash===1)ctx.setLineDash([it.size*3,it.size*2]);
+    else if(it.dash===2){ctx.setLineDash([it.size*0.1,it.size*2]);ctx.lineCap='round';}
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  ctx.restore();
+}
+
+/* стрелка на конце линии — style: 0 нет|1 уголок|2 треугольник|3 точка.
+   from/tip — соседняя и концевая точки сегмента, задают направление. */
+function drawArrowhead(ctx,from,tip,style,size,color){
+  if(!style)return;
+  const ang=Math.atan2(tip.y-from.y,tip.x-from.x);
+  const len=Math.max(6,size*3), wid=Math.max(4,size*2);
+  ctx.save();ctx.translate(tip.x,tip.y);ctx.rotate(ang);
+  ctx.fillStyle=color;ctx.strokeStyle=color;ctx.lineWidth=Math.max(1,size*0.5);
+  if(style===1){ctx.beginPath();ctx.moveTo(-len,-wid/2);ctx.lineTo(0,0);ctx.lineTo(-len,wid/2);ctx.stroke();}
+  else if(style===2){ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(-len,-wid/2);ctx.lineTo(-len,wid/2);ctx.closePath();ctx.fill();}
+  else if(style===3){ctx.beginPath();ctx.arc(-wid/2,0,wid/2,0,6.2832);ctx.fill();}
+  ctx.restore();
+}
+/* линия/полилиния/кривая/полигон. closed — только у полигона (заливка
+   только для него). Кривая переиспользует trace() — тот же сглаживающий
+   алгоритм, что рисует штрихи пера, без отдельной сплайн-математики. */
+function paintPath(ctx,it){
+  const pts=it.pts;
+  if(pts.length<2)return;
+  ctx.beginPath();
+  if(it.kind==='curve')trace(ctx,pts,true);
+  else{ctx.moveTo(pts[0].x,pts[0].y);for(let i=1;i<pts.length;i++)ctx.lineTo(pts[i].x,pts[i].y);}
+  if(it.closed)ctx.closePath();
+  if(it.fill&&it.closed){ctx.fillStyle=it.fill;ctx.fill();}
+  if(it.size>0){
+    ctx.lineWidth=it.size;ctx.strokeStyle=it.color;
+    if(it.dash===1)ctx.setLineDash([it.size*3,it.size*2]);
+    else if(it.dash===2){ctx.setLineDash([it.size*0.1,it.size*2]);ctx.lineCap='round';}
+    ctx.stroke();ctx.setLineDash([]);ctx.lineCap='butt';
+  }
+  if(!it.closed){
+    if(it.a1)drawArrowhead(ctx,pts[1],pts[0],it.a1,it.size,it.color);
+    if(it.a2)drawArrowhead(ctx,pts[pts.length-2],pts[pts.length-1],it.a2,it.size,it.color);
+  }
+}
+
+/* рисует один объект в переданный контекст — используется и доской, и экспортом */
+function paintItem(ctx,it){
+  if(it.type==='image'){
+    const e=getImg(it.url),rot=it.rot||0;
+    if(rot){const cx=it.x+it.w/2,cy=it.y+it.h/2;ctx.save();ctx.translate(cx,cy);ctx.rotate(rot);ctx.translate(-cx,-cy);}
+    if(e.ready)ctx.drawImage(e.img,it.x,it.y,it.w,it.h);
+    else{ctx.fillStyle='rgba(0,0,0,.05)';ctx.fillRect(it.x,it.y,it.w,it.h);}
+    if(rot)ctx.restore();
+    return;
+  }
+  if(it.type==='shape'){paintShape(ctx,it);return;}
+  if(it.type==='path'){paintPath(ctx,it);return;}
+  if(it.type==='pen'||it.type==='marker'){paintStroke(ctx,it);return;}
+  // неизвестные/будущие типы (conn/embed) — молча пропускаем, не роняем рендер
+}
+
+/* точное попадание точки в объект, с допуском r (мировые единицы) — общее для
+   ластика, выделения и hit-тестов будущих типов */
+function hitTest(it,w,r){
+  const b=it.bbox||(it.bbox=bboxOf(it));
+  if(w.x<b.x0-r||w.x>b.x1+r||w.y<b.y0-r||w.y>b.y1+r)return false;
+  if(BOX_TYPES.has(it.type)){
+    const rot=it.rot||0;
+    let px=w.x,py=w.y;
+    if(rot){const cx=it.x+it.w/2,cy=it.y+it.h/2;const p=rotAround(w.x,w.y,cx,cy,-rot);px=p.x;py=p.y;}
+    const inside=px>=it.x-r&&px<=it.x+it.w+r&&py>=it.y-r&&py<=it.y+it.h+r;
+    if(!inside)return false;
+    // незалитая фигура — реагирует только на клик у границы, не в пустой середине
+    if(it.type==='shape'&&!it.fill){
+      const tol=r+(it.size||0)/2+2;
+      if(it.kind==='ellipse'){
+        const rx=Math.abs(it.w)/2||1, ry=Math.abs(it.h)/2||1;
+        const lx=px-(it.x+it.w/2), ly=py-(it.y+it.h/2);
+        const nd=Math.hypot(lx/rx,ly/ry);
+        return Math.abs(nd-1)*Math.min(rx,ry)<tol;
+      }
+      const dl=px-it.x, dr=(it.x+it.w)-px, dt=py-it.y, db=(it.y+it.h)-py;
+      return Math.min(dl,dr,dt,db)<tol;
+    }
+    return true;
+  }
+  if(it.type==='path')return hitTestPath(it,w,r);
+  if(!Array.isArray(it.pts))return false;
+  for(const p of it.pts)if(Math.hypot(p.x-w.x,p.y-w.y)<r+(it.size||0)/2)return true;
+  return false;
+}
+/* линия/кривая имеет мало вершин, часто далеко друг от друга — проверка
+   расстояния "точка-сегмент" по всем рёбрам, а не только до самих вершин
+   (в отличие от штрихов, где точек и так много и они близко) */
+function hitTestPath(it,w,r){
+  const pts=it.pts,n=pts.length;
+  if(n<2)return n===1&&Math.hypot(pts[0].x-w.x,pts[0].y-w.y)<r+(it.size||0)/2;
+  const tol=r+(it.size||0)/2;
+  const distSeg=(ax,ay,bx,by)=>{
+    const dx=bx-ax,dy=by-ay,len2=dx*dx+dy*dy||1;
+    let t=((w.x-ax)*dx+(w.y-ay)*dy)/len2;t=Math.max(0,Math.min(1,t));
+    return Math.hypot(w.x-(ax+t*dx),w.y-(ay+t*dy));
+  };
+  for(let i=0;i<n-1;i++)if(distSeg(pts[i].x,pts[i].y,pts[i+1].x,pts[i+1].y)<tol)return true;
+  if(it.closed&&n>2&&distSeg(pts[n-1].x,pts[n-1].y,pts[0].x,pts[0].y)<tol)return true;
+  if(it.fill&&it.closed){
+    let inside=false;
+    for(let i=0,j=n-1;i<n;j=i++){
+      const xi=pts[i].x,yi=pts[i].y,xj=pts[j].x,yj=pts[j].y;
+      if(((yi>w.y)!==(yj>w.y))&&(w.x<(xj-xi)*(w.y-yi)/(yj-yi)+xi))inside=!inside;
+    }
+    if(inside)return true;
+  }
+  return false;
 }
 
 /* ═══════════════════ картинки ═══════════════════ */
@@ -385,13 +572,9 @@ function flushBoard(){
   const v=visRect();
   const hit=it=>{const b=it.bbox||(it.bbox=bboxOf(it));
     return!(b.x1<v.x0||b.x0>v.x1||b.y1<v.y0||b.y0>v.y1);};
-  // картинки всегда под записями — чтобы вставленный скрин не закрыл написанное
-  for(const it of items) if(it.type==='image'&&hit(it)){
-    const e=getImg(it.url);
-    if(e.ready)bctx.drawImage(e.img,it.x,it.y,it.w,it.h);
-    else{bctx.fillStyle='rgba(0,0,0,.05)';bctx.fillRect(it.x,it.y,it.w,it.h);}
-  }
-  for(const it of items) if(it.type!=='image'&&hit(it)) paintStroke(bctx,it);
+  // задний слой (картинки) всегда под записями — чтобы вставленный скрин не закрыл написанное
+  for(const it of items) if(BACK_TYPES.has(it.type)&&hit(it)) paintItem(bctx,it);
+  for(const it of items) if(!BACK_TYPES.has(it.type)&&hit(it)) paintItem(bctx,it);
 }
 
 const remoteLive=new Map(), cursors=new Map(), peers=new Map();
@@ -409,19 +592,64 @@ function flushLive(){
   };
   if(current)drawTmp(current);
   for(const s of remoteLive.values())drawTmp(s);
+  if(shapeDraft){
+    const d=shapeDraft;
+    const x0=Math.min(d.a.x,d.b.x), y0=Math.min(d.a.y,d.b.y);
+    const w0=Math.abs(d.b.x-d.a.x), h0=Math.abs(d.b.y-d.a.y);
+    paintShape(lctx,{kind:d.kind,x:x0,y:y0,w:w0,h:h0,rot:0,
+                     color:S.color,size:S.size/S.cam.z,dash:S.dash,fill:S.fill});
+  }
+  if(pathDraft){
+    const d=pathDraft;
+    let pts=d.pts;
+    if(d.mode==='vertex'&&d.live)pts=pts.concat([d.live]);
+    if(pts.length>=2){
+      paintPath(lctx,{kind:d.kind,pts,closed:false,
+        color:S.color,size:S.size/S.cam.z,dash:S.dash,fill:d.kind==='polygon'?S.fill:null,
+        a1:S.a1||0,a2:S.a2||0});
+    }
+    if(d.mode==='vertex'){
+      const rDot=4/S.cam.z;
+      lctx.fillStyle='#2F80ED';
+      for(const p of d.pts){lctx.beginPath();lctx.arc(p.x,p.y,rDot,0,6.2832);lctx.fill();}
+    }
+  }
 
   lctx.setTransform(dpr,0,0,dpr,0,0);
 
-  // рамка выделенной картинки
+  // рамка выделенного объекта — с учётом поворота у box-семейства
   if(selected){
-    const p=toScreen(selected.x,selected.y);
-    const w=selected.w*S.cam.z,h=selected.h*S.cam.z;
-    lctx.strokeStyle='#2F80ED';lctx.lineWidth=1.5;
-    lctx.setLineDash([5,4]);lctx.strokeRect(p.x,p.y,w,h);lctx.setLineDash([]);
-    for(const [hx,hy] of [[0,0],[1,0],[0,1],[1,1]]){
-      const cx=p.x+hx*w, cy=p.y+hy*h;
-      lctx.fillStyle='#fff';lctx.strokeStyle='#2F80ED';lctx.lineWidth=1.5;
-      lctx.beginPath();lctx.rect(cx-5,cy-5,10,10);lctx.fill();lctx.stroke();
+    const col=selected.locked?'#B3322B':'#2F80ED';
+    lctx.strokeStyle=col;lctx.lineWidth=1.5;lctx.setLineDash([5,4]);
+    if(BOX_TYPES.has(selected.type)){
+      const cx=selected.x+selected.w/2,cy=selected.y+selected.h/2;
+      const p=toScreen(cx,cy),rot=selected.rot||0;
+      lctx.save();lctx.translate(p.x,p.y);lctx.rotate(rot);
+      lctx.strokeRect(-selected.w*S.cam.z/2,-selected.h*S.cam.z/2,selected.w*S.cam.z,selected.h*S.cam.z);
+      lctx.restore();
+    }else{
+      const b=bboxOf(selected),p0=toScreen(b.x0,b.y0);
+      lctx.strokeRect(p0.x,p0.y,(b.x1-b.x0)*S.cam.z,(b.y1-b.y0)*S.cam.z);
+    }
+    lctx.setLineDash([]);
+    const handles=handlesFor(selected);
+    if(handles.length){
+      const centerW=BOX_TYPES.has(selected.type)
+        ?{x:selected.x+selected.w/2,y:selected.y+selected.h/2}
+        :(()=>{const b=bboxOf(selected);return{x:(b.x0+b.x1)/2,y:(b.y0+b.y1)/2};})();
+      const centerS=toScreen(centerW.x,centerW.y);
+      for(const h of handles){
+        if(h.kind==='rotate'){
+          lctx.strokeStyle=col;lctx.lineWidth=1;lctx.setLineDash([3,3]);
+          lctx.beginPath();lctx.moveTo(centerS.x,centerS.y);lctx.lineTo(h.sx,h.sy);lctx.stroke();
+          lctx.setLineDash([]);
+          lctx.fillStyle='#fff';lctx.strokeStyle=col;lctx.lineWidth=1.5;
+          lctx.beginPath();lctx.arc(h.sx,h.sy,6,0,6.2832);lctx.fill();lctx.stroke();
+        }else{
+          lctx.fillStyle='#fff';lctx.strokeStyle=col;lctx.lineWidth=1.5;
+          lctx.beginPath();lctx.rect(h.sx-5,h.sy-5,10,10);lctx.fill();lctx.stroke();
+        }
+      }
     }
   }
   // кольцо ластика
@@ -501,7 +729,7 @@ const net={
     setConn('wait','Подключаюсь…');
     const ws=new WebSocket(u); this.ws=ws;
     ws.onopen=()=>{this.tries=0;setConn('ok','На связи');
-      ws.send(JSON.stringify({t:'join',room:S.boardId,name:S.name,key:S.boardKey}));};
+      ws.send(JSON.stringify({t:'join',room:S.boardId,name:S.name,token:authToken()}));};
     ws.onmessage=e=>{try{this.on(JSON.parse(e.data));}catch{}};
     ws.onclose=ev=>{
       if(ev.code===4004){setConn('off','Доска удалена');return;}
@@ -542,7 +770,19 @@ const net={
       case 'add':remoteLive.delete(m.item.id);addItem(inflate(m.item));break;
       case 'bulk':for(const it of m.items)addItem(inflate(it));break;
       case 'erase':for(const id of m.ids){if(selected&&selected.id===id)select(null);removeItem(id);}drawBoard();break;
-      case 'move':{const it=byId.get(m.id);if(it){it.x=m.x;it.y=m.y;it.w=m.w;it.h=m.h;it.bbox=bboxOf(it);drawBoard();drawLive();}break;}
+      case 'move':{
+        const it=byId.get(m.id);
+        if(it){
+          for(const k of (PATCHABLE[it.type]||[])){
+            if(!(k in m))continue;
+            it[k]=(k==='pts')?m.pts.map(a=>a.length>2?{x:a[0],y:a[1],p:a[2]}:{x:a[0],y:a[1]}):m[k];
+          }
+          it.bbox=bboxOf(it);
+          if(selected&&selected.id===it.id)updateSelBar(it);
+          drawBoard();drawLive();
+        }
+        break;
+      }
       case 'cleared':items=[];byId.clear();history=[];redoStack=[];select(null);drawBoard();hint('Доска очищена');break;
       case 'lock':S.locked=m.on;applyRole();
         hint(m.on?'Преподаватель закрыл доску для рисования':'Рисование снова доступно');break;
@@ -572,16 +812,44 @@ const net={
   }
 };
 
-const deflate=it=>it.type==='image'
-  ?{id:it.id,type:'image',url:it.url,x:+it.x.toFixed(1),y:+it.y.toFixed(1),w:+it.w.toFixed(1),h:+it.h.toFixed(1)}
-  :{id:it.id,type:it.type,color:it.color,size:+it.size.toFixed(3),
-    pts:it.pts.map(p=>[+p.x.toFixed(2),+p.y.toFixed(2),+p.p.toFixed(3)])};
-function inflate(raw){
-  if(raw.type==='image')return{...raw,bbox:null};
+/* какие поля 'move' разрешено применять к какому типу — зеркало server.js PATCHABLE */
+const PATCHABLE={
+  image:['x','y','w','h','rot','locked'],
+  shape:['x','y','w','h','rot','color','size','dash','fill','locked'],
+  path:['pts','color','size','dash','fill','a1','a2','locked'],
+  pen:['pts','color','size','locked'],
+  marker:['pts','color','size','locked']
+};
+
+/* реестры сериализации по типу — новый тип добавляет свою пару функций сюда */
+const DEFLATE={
+  image:it=>({id:it.id,type:'image',url:it.url,x:+it.x.toFixed(1),y:+it.y.toFixed(1),w:+it.w.toFixed(1),h:+it.h.toFixed(1),
+              rot:+((it.rot||0).toFixed(4)),locked:!!it.locked}),
+  shape:it=>({id:it.id,type:'shape',kind:it.kind,x:+it.x.toFixed(1),y:+it.y.toFixed(1),w:+it.w.toFixed(1),h:+it.h.toFixed(1),
+              rot:+((it.rot||0).toFixed(4)),color:it.color,size:+it.size.toFixed(3),dash:it.dash||0,
+              fill:it.fill||null,locked:!!it.locked}),
+  path:it=>({id:it.id,type:'path',kind:it.kind,closed:!!it.closed,
+             pts:it.pts.map(p=>[+p.x.toFixed(2),+p.y.toFixed(2)]),
+             color:it.color,size:+it.size.toFixed(3),dash:it.dash||0,fill:it.fill||null,
+             a1:it.a1||0,a2:it.a2||0,locked:!!it.locked})
+};
+const deflateStroke=it=>({id:it.id,type:it.type,color:it.color,size:+it.size.toFixed(3),
+  pts:it.pts.map(p=>[+p.x.toFixed(2),+p.y.toFixed(2),+p.p.toFixed(3)]),locked:!!it.locked});
+const deflate=it=>(DEFLATE[it.type]||deflateStroke)(it);
+
+const INFLATE={
+  image:raw=>({...raw,rot:raw.rot||0,locked:!!raw.locked,bbox:null}),
+  shape:raw=>({...raw,rot:raw.rot||0,dash:raw.dash||0,fill:raw.fill||null,locked:!!raw.locked,bbox:null}),
+  path:raw=>({...raw,pts:raw.pts.map(a=>({x:a[0],y:a[1]})),closed:!!raw.closed,
+              dash:raw.dash||0,fill:raw.fill||null,a1:raw.a1||0,a2:raw.a2||0,locked:!!raw.locked,bbox:null})
+};
+function inflateStroke(raw){
   const s=mkStroke(raw.type,raw.color,raw.size,raw.id,raw.by);
   s.pts=raw.pts.map(a=>({x:a[0],y:a[1],p:a[2]}));
+  s.locked=!!raw.locked;
   return s;
 }
+function inflate(raw){return (INFLATE[raw.type]||inflateStroke)(raw);}
 function addItem(it,quiet){
   if(byId.has(it.id))return;
   it.bbox=bboxOf(it);items.push(it);byId.set(it.id,it);
@@ -602,7 +870,7 @@ setInterval(()=>{
 let current=null,drawId=null,lastPt=null,lastT=0,pressure=0.45,lastPen=0;
 const pointers=new Map();
 let pinch=null,panning=null,spaceDown=false,erasing=null,erasedBatch=[];
-let selected=null,dragging=null,seqNo=0;
+let selected=null,dragging=null,seqNo=0,shapeDraft=null,pathDraft=null;
 
 const newId=()=>(S.me?S.me.id:'x')+'-'+(++seqNo)+'-'+Date.now().toString(36).slice(-4);
 const localXY=e=>{const r=stage.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};};
@@ -615,28 +883,76 @@ function select(it){
   const bar=document.getElementById('selbar');
   bar.classList.toggle('show',!!it);
   if(it){
-    const p=toScreen(it.x,it.y);
+    const b=bboxOf(it);
+    const p=toScreen(b.x0,b.y0);
     bar.style.left=Math.max(8,Math.min(innerWidth-190,p.x))+'px';
     bar.style.top=Math.max(8,p.y-46)+'px';
+    updateSelBar(it);
   }
   drawLive();
 }
-function imageAt(w){
+function updateSelBar(it){
+  const lockBtn=document.getElementById('selLock');
+  if(!lockBtn)return;
+  lockBtn.textContent=it.locked?'Разблокировать':'Заблокировать';
+  lockBtn.classList.toggle('on',!!it.locked);
+}
+function itemAt(w){
+  const r=6/S.cam.z; // небольшой экранно-постоянный допуск клика — точки штриха дискретны и могут быть реже, чем палец/клик
   for(let i=items.length-1;i>=0;i--){
     const it=items[i];
-    if(it.type!=='image')continue;
-    if(w.x>=it.x&&w.x<=it.x+it.w&&w.y>=it.y&&w.y<=it.y+it.h)return it;
+    if(!SELECTABLE.has(it.type))continue;
+    if(hitTest(it,w,r))return it;
   }
   return null;
 }
+/* хэндлы выделения в экранных координатах — 4 угла (resize) + 1 rotate-хэндл.
+   Для box-семейства углы учитывают it.rot; для точечного (штрихи) —
+   углы берутся по bbox, поворот у них не хранится отдельным полем
+   (масштаб/поворот сразу применяются к pts), так что здесь всегда 0.
+   Заблокированный объект — пустой список: ни двигать, ни крутить, ни ресайзить. */
+function handlesFor(it){
+  if(!it||it.locked||!SELECTABLE.has(it.type))return[];
+  let corners,rot=0;
+  if(BOX_TYPES.has(it.type)){
+    rot=it.rot||0;
+    const cx=it.x+it.w/2,cy=it.y+it.h/2,hw=it.w/2,hh=it.h/2;
+    const toW=(lx,ly)=>rotAround(cx+lx,cy+ly,cx,cy,rot);
+    corners={nw:toW(-hw,-hh),ne:toW(hw,-hh),sw:toW(-hw,hh),se:toW(hw,hh)};
+  }else{
+    const b=bboxOf(it);
+    corners={nw:{x:b.x0,y:b.y0},ne:{x:b.x1,y:b.y0},sw:{x:b.x0,y:b.y1},se:{x:b.x1,y:b.y1}};
+  }
+  const s={};for(const k in corners)s[k]=toScreen(corners[k].x,corners[k].y);
+  const handles=[
+    {name:'nw',kind:'corner',sx:s.nw.x,sy:s.nw.y},{name:'ne',kind:'corner',sx:s.ne.x,sy:s.ne.y},
+    {name:'sw',kind:'corner',sx:s.sw.x,sy:s.sw.y},{name:'se',kind:'corner',sx:s.se.x,sy:s.se.y}
+  ];
+  const midW={x:(corners.nw.x+corners.ne.x)/2,y:(corners.nw.y+corners.ne.y)/2};
+  const midS=toScreen(midW.x,midW.y);
+  const ux=Math.sin(rot),uy=-Math.cos(rot);
+  handles.push({name:'rot',kind:'rotate',sx:midS.x+ux*24,sy:midS.y+uy*24});
+  // отдельные вершины линии/полигона — редактируются независимо от rotate/resize
+  if(it.type==='path'){
+    it.pts.forEach((p,i)=>{
+      const s=toScreen(p.x,p.y);
+      handles.push({name:'v'+i,kind:'vertex',index:i,sx:s.x,sy:s.y});
+    });
+  }
+  return handles;
+}
 function handleAt(sp){
   if(!selected)return null;
-  const p=toScreen(selected.x,selected.y);
-  const w=selected.w*S.cam.z,h=selected.h*S.cam.z;
-  const corners=[['nw',p.x,p.y],['ne',p.x+w,p.y],['sw',p.x,p.y+h],['se',p.x+w,p.y+h]];
-  for(const [name,cx,cy] of corners)
-    if(Math.abs(sp.x-cx)<9&&Math.abs(sp.y-cy)<9)return name;
+  for(const h of handlesFor(selected))
+    if(Math.abs(sp.x-h.sx)<9&&Math.abs(sp.y-h.sy)<9)return h;
   return null;
+}
+const OPPOSITE_CORNER={nw:'se',ne:'sw',sw:'ne',se:'nw'};
+/* снимок объекта на начало драга — pts копируются глубоко (это отдельные
+   {x,y,p}-объекты), иначе before/after в истории ссылались бы на один
+   и тот же массив и undo не смог бы восстановить исходную форму */
+function snapshotItem(it){
+  return {...it, pts: Array.isArray(it.pts)? it.pts.map(p=>({...p})) : it.pts};
 }
 
 stage.addEventListener('pointerdown',e=>{
@@ -646,7 +962,7 @@ stage.addEventListener('pointerdown',e=>{
   if(e.pointerType==='touch'&&performance.now()-lastPen<900)return;
 
   if(pointers.size===2){
-    abortStroke();
+    abortStroke();abortDraft();
     const[a,b]=[...pointers.values()];
     pinch={d:Math.hypot(a.x-b.x,a.y-b.y),c:{x:(a.x+b.x)/2,y:(a.y+b.y)/2}};return;
   }
@@ -658,21 +974,70 @@ stage.addEventListener('pointerdown',e=>{
   }
   if(e.button!==0&&e.pointerType==='mouse')return;
 
-  /* выделение картинок */
+  /* выделение объектов */
   if(S.tool==='select'){
     const h=handleAt(pt);
-    if(h&&selected){
-      dragging={mode:'resize',corner:h,it:selected,start:{...selected},w0:w};
+    if(h&&selected&&!selected.locked){
+      if(h.kind==='rotate'){
+        const b=bboxOf(selected);
+        const cx=BOX_TYPES.has(selected.type)?selected.x+selected.w/2:(b.x0+b.x1)/2;
+        const cy=BOX_TYPES.has(selected.type)?selected.y+selected.h/2:(b.y0+b.y1)/2;
+        dragging={mode:'rotate',it:selected,start:snapshotItem(selected),cx,cy,
+                  a0:Math.atan2(w.y-cy,w.x-cx)};
+      }else if(h.kind==='vertex'){
+        dragging={mode:'vertex',it:selected,index:h.index,start:snapshotItem(selected)};
+      }else{
+        const anchor=OPPOSITE_CORNER[h.name];
+        const geom=snapshotItem(selected);
+        let anchorWorld,rot0=0;
+        if(BOX_TYPES.has(selected.type)){
+          rot0=geom.rot||0;
+          const stcx=geom.x+geom.w/2, stcy=geom.y+geom.h/2;
+          const ax0=anchor.includes('e')?geom.w/2:-geom.w/2, ay0=anchor.includes('s')?geom.h/2:-geom.h/2;
+          const p=rotAround(stcx+ax0,stcy+ay0,stcx,stcy,rot0);
+          anchorWorld={x:p.x,y:p.y};
+        }else{
+          const b0=bboxOf(geom);
+          anchorWorld={x:anchor.includes('e')?b0.x1:b0.x0, y:anchor.includes('s')?b0.y1:b0.y0};
+        }
+        dragging={mode:'resize',it:selected,corner:h.name,anchor,anchorWorld,rot0,start:geom};
+      }
       return;
     }
-    const im=imageAt(w);
+    const im=itemAt(w);
     if(im&&mineOnly(im)&&canEdit()){
       select(im);
-      dragging={mode:'move',it:im,start:{...im},w0:w};
+      if(!im.locked)dragging={mode:'move',it:im,start:snapshotItem(im),w0:w};
     } else select(null);
     return;
   }
   if(!canEdit()){hint('Преподаватель закрыл доску для рисования');return;}
+
+  if(S.tool==='shape'){
+    shapeDraft={kind:S.shapeKind,a:w,b:w};
+    drawLive();return;
+  }
+
+  if(S.tool==='path'){
+    if(S.pathKind==='line'){
+      pathDraft={kind:'line',pts:[w,w],mode:'drag'};
+    }else if(!pathDraft||pathDraft.mode!=='vertex'||pathDraft.kind!==S.pathKind){
+      pathDraft={kind:S.pathKind,pts:[w],mode:'vertex'};
+    }else{
+      const last=pathDraft.pts[pathDraft.pts.length-1];
+      const dupTol=4/S.cam.z;
+      const first=pathDraft.pts[0];
+      const closeTol=8/S.cam.z;
+      if(Math.hypot(w.x-last.x,w.y-last.y)<dupTol){
+        // вероятно второй клик двойного клика — не дублируем вершину, ждём dblclick
+      }else if(pathDraft.kind==='polygon'&&pathDraft.pts.length>=3&&Math.hypot(w.x-first.x,w.y-first.y)<closeTol){
+        commitPathDraft();
+      }else{
+        pathDraft.pts.push(w);
+      }
+    }
+    drawLive();return;
+  }
 
   if(S.tool==='eraser'){erasing=true;eraseAt(pt);return;}
 
@@ -690,6 +1055,10 @@ stage.addEventListener('pointermove',e=>{
   if(pointers.has(e.pointerId))pointers.set(e.pointerId,pt);
   hoverPt=pt;                                  // нужна и ластику, и вставке скрина
   if(S.tool==='eraser')drawLive();
+  // резиновая линия к курсору в режиме расстановки вершин — работает и без
+  // нажатой кнопки (обычное наведение), поэтому проверяется независимо от
+  // pinch/panning/dragging ниже
+  if(pathDraft&&pathDraft.mode==='vertex'){pathDraft.live=toWorld(pt.x,pt.y);drawLive();}
 
   if(pinch&&pointers.size>=2){
     const[a,b]=[...pointers.values()];
@@ -705,17 +1074,69 @@ stage.addEventListener('pointermove',e=>{
   if(dragging){
     const w=toWorld(pt.x,pt.y),it=dragging.it,st=dragging.start;
     if(dragging.mode==='move'){
-      it.x=st.x+(w.x-dragging.w0.x);it.y=st.y+(w.y-dragging.w0.y);
-    }else{
-      const k=st.w/st.h, c=dragging.corner;
-      let nw=st.w+(c.includes('e')?(w.x-dragging.w0.x):-(w.x-dragging.w0.x));
-      nw=Math.max(16,nw);
-      const nh=nw/k;
-      it.w=nw;it.h=nh;
-      if(c.includes('w'))it.x=st.x+st.w-nw;
-      if(c.includes('n'))it.y=st.y+st.h-nh;
+      const dx=w.x-dragging.w0.x, dy=w.y-dragging.w0.y;
+      if(BOX_TYPES.has(it.type)){ it.x=st.x+dx; it.y=st.y+dy; }
+      else if(Array.isArray(st.pts)) it.pts=st.pts.map(p=>('p' in p)?{x:p.x+dx,y:p.y+dy,p:p.p}:{x:p.x+dx,y:p.y+dy});
+    }else if(dragging.mode==='resize'){
+      const corner=dragging.corner, anchor=dragging.anchor;
+      if(BOX_TYPES.has(it.type)){
+        // Ресайз в локальной (неповёрнутой) системе координат объекта:
+        // переводим текущий указатель в локальные оси, откладывая от
+        // неподвижного противоположного угла (anchorWorld). Новый центр
+        // считаем из условия "anchor остаётся на месте": center = anchorWorld - R(rot)*offset.
+        const rot=dragging.rot0, cos=Math.cos(rot), sin=Math.sin(rot);
+        const wx=w.x-dragging.anchorWorld.x, wy=w.y-dragging.anchorWorld.y;
+        const locX=wx*cos+wy*sin, locY=-wx*sin+wy*cos;   // обратный поворот вектора на -rot
+        let nw=locX*(corner.includes('e')?1:-1);
+        nw=Math.max(16,nw);
+        const k=st.w/st.h, nh=nw/k;
+        const ax=anchor.includes('e')?nw/2:-nw/2, ay=anchor.includes('s')?nh/2:-nh/2;
+        const offX=ax*cos-ay*sin, offY=ax*sin+ay*cos;    // R(rot)*(ax,ay)
+        const cx=dragging.anchorWorld.x-offX, cy=dragging.anchorWorld.y-offY;
+        it.w=nw; it.h=nh; it.rot=rot;
+        it.x=cx-nw/2; it.y=cy-nh/2;
+      }else if(Array.isArray(st.pts)){
+        const b0=bboxOf(st);
+        const w0=Math.max(1,b0.x1-b0.x0), h0=Math.max(1,b0.y1-b0.y0);
+        const ax=dragging.anchorWorld.x, ay=dragging.anchorWorld.y;
+        let nw0=Math.max(8,Math.abs(w.x-ax)), nh0=Math.max(8,Math.abs(w.y-ay));
+        const sx=nw0/w0, sy=nh0/h0;
+        it.pts=st.pts.map(p=>('p' in p)?{x:ax+(p.x-ax)*sx,y:ay+(p.y-ay)*sy,p:p.p}:{x:ax+(p.x-ax)*sx,y:ay+(p.y-ay)*sy});
+      }
+    }else if(dragging.mode==='rotate'){
+      let delta=Math.atan2(w.y-dragging.cy,w.x-dragging.cx)-dragging.a0;
+      if(e.shiftKey){const step=Math.PI/12;delta=Math.round(delta/step)*step;}
+      if(BOX_TYPES.has(it.type)){
+        it.rot=(st.rot||0)+delta;
+      }else if(Array.isArray(st.pts)){
+        it.pts=st.pts.map(p=>{const r=rotAround(p.x,p.y,dragging.cx,dragging.cy,delta);return('p' in p)?{x:r.x,y:r.y,p:p.p}:{x:r.x,y:r.y};});
+      }
+    }else if(dragging.mode==='vertex'){
+      it.pts=st.pts.map((p,i)=>i===dragging.index?{x:w.x,y:w.y}:p);
     }
     it.bbox=bboxOf(it);drawBoard();select(it);return;
+  }
+  if(shapeDraft){
+    const w=toWorld(pt.x,pt.y);let bx=w.x,by=w.y;
+    if(e.shiftKey){
+      const dx=bx-shapeDraft.a.x, dy=by-shapeDraft.a.y, m=Math.max(Math.abs(dx),Math.abs(dy));
+      bx=shapeDraft.a.x+(dx<0?-1:1)*m; by=shapeDraft.a.y+(dy<0?-1:1)*m;
+    }
+    shapeDraft.b={x:bx,y:by};
+    drawLive();return;
+  }
+  if(pathDraft&&pathDraft.mode==='drag'){
+    const w=toWorld(pt.x,pt.y);
+    let b=w;
+    if(e.shiftKey){
+      const a=pathDraft.pts[0];
+      const step=Math.PI/12;
+      const ang=Math.round(Math.atan2(w.y-a.y,w.x-a.x)/step)*step;
+      const dist=Math.hypot(w.x-a.x,w.y-a.y);
+      b={x:a.x+Math.cos(ang)*dist,y:a.y+Math.sin(ang)*dist};
+    }
+    pathDraft.pts[1]=b;
+    drawLive();return;
   }
   if(erasing){eraseAt(pt);return;}
 
@@ -744,19 +1165,73 @@ stage.addEventListener('pointermove',e=>{
   }
 });
 
+/* поля геометрии по типу — что снимать до/после драга для undo и сети.
+   Для box-типов (image, позже shape) достаточно плоского копирования;
+   для точечных типов (появятся в следующих фазах) потребуется глубокая
+   копия pts — иначе before/after будут ссылаться на один и тот же массив. */
+const GEOM_KEYS={
+  image:['x','y','w','h','rot','locked'],
+  shape:['x','y','w','h','rot','color','size','dash','fill','locked'],
+  path:['pts','color','size','dash','fill','a1','a2','locked'],
+  pen:['pts','locked'],marker:['pts','locked']
+};
+function geomKeys(it){return GEOM_KEYS[it.type]||[];}
+/* снимок геометрии для undo/redo — pts всегда глубокая копия {x,y,p}-объектов
+   (внутреннее представление), а не проводной формат [x,y,p]-кортежей */
+function snapGeom(src,it){
+  const o={};
+  for(const k of geomKeys(it)) o[k]=(k==='pts'&&Array.isArray(src.pts))?src.pts.map(p=>({...p})):src[k];
+  return o;
+}
+function geomChanged(a,b){
+  for(const k in a){
+    if(Array.isArray(a[k])){
+      if(!Array.isArray(b[k])||a[k].length!==b[k].length)return true;
+      for(let i=0;i<a[k].length;i++)if(a[k][i].x!==b[k][i].x||a[k][i].y!==b[k][i].y)return true;
+    }else if(a[k]!==b[k])return true;
+  }
+  return false;
+}
+/* геометрия для undo хранит pts как {x,y,p}-объекты; сеть/сервер ждут
+   те же кортежи [x,y,p], что и deflate() — эта функция переводит одно в другое */
+function wireGeom(g){
+  if(!('pts' in g))return g;
+  // штрихи несут давление (p), у линий/полигонов его нет — кортеж короче
+  return {...g, pts:g.pts.map(p=>'p' in p ? [+p.x.toFixed(2),+p.y.toFixed(2),+p.p.toFixed(3)] : [+p.x.toFixed(2),+p.y.toFixed(2)])};
+}
+
 function endPointer(e){
   pointers.delete(e.pointerId);
   if(pointers.size<2)pinch=null;
   if(panning){panning=null;applyCursor();}
   if(dragging){
-    const it=dragging.it,st=dragging.start;
-    if(it.x!==st.x||it.y!==st.y||it.w!==st.w||it.h!==st.h){
-      history.push({type:'move',id:it.id,before:{x:st.x,y:st.y,w:st.w,h:st.h},
-                    after:{x:it.x,y:it.y,w:it.w,h:it.h}});
+    const it=dragging.it;
+    const before=snapGeom(dragging.start,it), after=snapGeom(it,it);
+    if(geomChanged(before,after)){
+      history.push({type:'move',id:it.id,before,after});
       redoStack.length=0;
-      net.send({t:'move',id:it.id,x:it.x,y:it.y,w:it.w,h:it.h});
+      net.send({t:'move',id:it.id,...wireGeom(after)});
     }
     dragging=null;
+  }
+  if(shapeDraft){
+    const d=shapeDraft;shapeDraft=null;
+    const x0=Math.min(d.a.x,d.b.x), y0=Math.min(d.a.y,d.b.y);
+    const w0=Math.abs(d.b.x-d.a.x), h0=Math.abs(d.b.y-d.a.y);
+    if(Math.max(w0,h0)*S.cam.z>=3){
+      const it={id:newId(),by:S.me&&S.me.id,type:'shape',kind:d.kind,
+                x:x0,y:y0,w:Math.max(0.5,w0),h:Math.max(0.5,h0),rot:0,
+                color:S.color,size:S.size/S.cam.z,dash:S.dash,fill:S.fill,locked:false};
+      addItem(it);
+      history.push({type:'add',item:it});redoStack.length=0;
+      net.send({t:'add',item:deflate(it)});
+    }
+    drawLive();
+  }
+  if(pathDraft&&pathDraft.mode==='drag'){
+    const d=pathDraft;pathDraft=null;
+    if(Math.hypot(d.pts[1].x-d.pts[0].x,d.pts[1].y-d.pts[0].y)*S.cam.z>=3)commitPath(d.kind,d.pts);
+    drawLive();
   }
   if(erasing){erasing=null;commitErase();}
   if(current&&e.pointerId===drawId)commit();
@@ -765,6 +1240,9 @@ stage.addEventListener('pointerup',endPointer);
 stage.addEventListener('pointercancel',endPointer);
 stage.addEventListener('pointerleave',()=>{hoverPt=null;drawLive();});
 stage.addEventListener('contextmenu',e=>e.preventDefault());
+stage.addEventListener('dblclick',e=>{
+  if(pathDraft&&pathDraft.mode==='vertex'){e.preventDefault();commitPathDraft();}
+});
 
 function commit(){
   const s=current;current=null;drawId=null;drawLive();
@@ -775,17 +1253,36 @@ function commit(){
   net.send({t:'add',item:deflate(s)});net.sid=null;net.sent=0;
 }
 function abortStroke(){if(current){current=null;drawId=null;net.sid=null;drawLive();}}
+function abortDraft(){
+  if(shapeDraft){shapeDraft=null;drawLive();}
+  if(pathDraft){pathDraft=null;drawLive();}
+}
+/* коммит новой линии/полилинии/кривой/полигона — общий выход и для
+   drag-режима (line/arrow), и для расстановки вершин кликами */
+function commitPath(kind,pts){
+  const it={id:newId(),by:S.me&&S.me.id,type:'path',kind,
+            pts:pts.map(p=>({x:p.x,y:p.y})),closed:kind==='polygon',
+            color:S.color,size:S.size/S.cam.z,dash:S.dash,
+            fill:kind==='polygon'?S.fill:null,
+            a1:S.a1||0,a2:S.a2||0,locked:false,bbox:null};
+  addItem(it);
+  history.push({type:'add',item:it});redoStack.length=0;
+  net.send({t:'add',item:deflate(it)});
+}
+function commitPathDraft(){
+  if(!pathDraft)return;
+  const d=pathDraft;pathDraft=null;
+  const minPts=d.kind==='polygon'?3:2;
+  if(d.pts.length>=minPts)commitPath(d.kind,d.pts);
+  drawLive();
+}
 
 function eraseAt(pt){
   const w=toWorld(pt.x,pt.y),r=eraserR();
   for(let i=items.length-1;i>=0;i--){
-    const it=items[i],b=it.bbox;
-    if(w.x<b.x0-r||w.x>b.x1+r||w.y<b.y0-r||w.y>b.y1+r)continue;
+    const it=items[i];
     if(!mineOnly(it))continue;
-    let hit=false;
-    if(it.type==='image')hit=true;
-    else for(const p of it.pts)if(Math.hypot(p.x-w.x,p.y-w.y)<r+it.size/2){hit=true;break;}
-    if(hit){
+    if(hitTest(it,w,r)){
       if(selected&&selected.id===it.id)select(null);
       erasedBatch.push(it);removeItem(it.id);drawBoard();
     }
@@ -830,7 +1327,7 @@ async function placeImage(blob,screenPt){
     hint('Загружаю картинку…');
     const file=await toUploadable(blob);
     const bmp=await createImageBitmap(file);
-    const r=await fetch('/api/upload?board='+encodeURIComponent(S.boardId)+'&key='+encodeURIComponent(S.boardKey),
+    const r=await fetch('/api/upload?board='+encodeURIComponent(S.boardId)+'&token='+encodeURIComponent(authToken()),
       {method:'POST',headers:{'content-type':file.type},body:file});
     const data=await r.json().catch(()=>({}));
     if(!r.ok)throw new Error(data.error||'ошибка загрузки');
@@ -841,7 +1338,7 @@ async function placeImage(blob,screenPt){
     const w=bmp.width*k, h=bmp.height*k;
     const c=screenPt?toWorld(screenPt.x,screenPt.y):toWorld(board.clientWidth/2,board.clientHeight/2);
     const it={id:newId(),by:S.me&&S.me.id,type:'image',url:data.url,
-              x:c.x-w/2,y:c.y-h/2,w,h};
+              x:c.x-w/2,y:c.y-h/2,w,h,rot:0,locked:false};
     addItem(it);
     history.push({type:'add',item:it});redoStack.length=0;
     net.send({t:'add',item:deflate(it)});
@@ -875,7 +1372,7 @@ function undo(){
   else if(op.type==='erase'){for(const it of op.items)addItem(it);
     net.send({t:'restore',items:op.items.map(deflate)});}
   else{const it=byId.get(op.id);if(it){Object.assign(it,op.before);it.bbox=bboxOf(it);
-    net.send({t:'move',id:it.id,...op.before});}}
+    net.send({t:'move',id:it.id,...wireGeom(op.before)});}}
   redoStack.push(op);drawBoard();drawLive();
 }
 function redo(){
@@ -885,7 +1382,7 @@ function redo(){
     for(const id of ids){if(selected&&selected.id===id)select(null);removeItem(id);}
     net.send({t:'erase',ids});}
   else{const it=byId.get(op.id);if(it){Object.assign(it,op.after);it.bbox=bboxOf(it);
-    net.send({t:'move',id:it.id,...op.after});}}
+    net.send({t:'move',id:it.id,...wireGeom(op.after)});}}
   history.push(op);drawBoard();drawLive();
 }
 
@@ -895,31 +1392,84 @@ const sizeVal=document.getElementById('sizeVal'),prev=document.getElementById('p
 const pctx=prev.getContext('2d'),peersEl=document.getElementById('peers');
 const palette=()=>S.tool==='marker'?MARKERS:PENS;
 
+/* если что-то выделено — правит стиль у выделенного объекта (генерируя
+   обычную move-операцию для undo/сети); иначе просто меняет умолчание
+   для следующего штриха/фигуры. Работает для любого типа, у которого
+   есть такое поле (образы, например, поля color/size/fill/dash не имеют). */
+function applyStyleToSelection(key,value){
+  if(!selected||selected.locked||!(key in selected))return;
+  const before=snapGeom(selected,selected);
+  selected[key]=value;
+  selected.bbox=bboxOf(selected);
+  const after=snapGeom(selected,selected);
+  history.push({type:'move',id:selected.id,before,after});redoStack.length=0;
+  net.send({t:'move',id:selected.id,...wireGeom(after)});
+  drawBoard();
+}
 function renderInks(){
   inksEl.innerHTML='';
   for(const c of palette()){
     const b=document.createElement('button');
     b.className='ink'+(c===S.color?' on':'');b.style.background=c;b.title=c;
-    b.onclick=()=>{S.color=c;if(S.tool==='marker')S.markerColor=c;else S.penColor=c;renderInks();drawPreview();};
+    b.onclick=()=>{
+      S.color=c;
+      if(S.tool==='marker')S.markerColor=c;else if(S.tool==='pen')S.penColor=c;
+      renderInks();drawPreview();
+      applyStyleToSelection('color',c);
+    };
     inksEl.appendChild(b);
   }
 }
+const NO_FILL_BG='repeating-linear-gradient(45deg,#fff,#fff 3px,#c33 3px,#c33 4px)';
+function renderFills(){
+  const fillsEl=document.getElementById('fills');
+  fillsEl.innerHTML='';
+  for(const f of FILLS){
+    const b=document.createElement('button');
+    b.className='ink'+(f===S.fill?' on':'');
+    b.style.background=f||NO_FILL_BG;b.title=f||'без заливки';
+    b.onclick=()=>{S.fill=f;renderFills();applyStyleToSelection('fill',f);};
+    fillsEl.appendChild(b);
+  }
+}
+function updateDashButtons(){
+  document.querySelectorAll('[data-dash]').forEach(b=>b.classList.toggle('on',+b.dataset.dash===S.dash));
+}
+document.querySelectorAll('[data-dash]').forEach(b=>{
+  b.onclick=()=>{S.dash=+b.dataset.dash;updateDashButtons();applyStyleToSelection('dash',S.dash);};
+});
 function setTool(t){
   S.tool=t;
   document.querySelectorAll('.tool[data-tool]').forEach(b=>b.classList.toggle('on',b.dataset.tool===t));
-  const drawing=t==='pen'||t==='marker';
-  document.getElementById('penPanel').classList.toggle('hidden',!drawing);
+  document.querySelectorAll('.tool[data-shape]').forEach(b=>b.classList.toggle('on',t==='shape'&&b.dataset.shape===S.shapeKind));
+  document.querySelectorAll('.tool[data-path]').forEach(b=>b.classList.toggle('on',t==='path'&&b.dataset.path===S.pathKind));
+  const styled=STYLED.has(t);
+  const fillable=t==='shape'||t==='path';
+  document.getElementById('penPanel').classList.toggle('hidden',!styled);
+  document.getElementById('fillRow').classList.toggle('hidden',!fillable);
+  document.getElementById('dashRow').classList.toggle('hidden',!fillable);
+  document.getElementById('arrowRow').classList.toggle('hidden',t!=='path');
   if(t!=='select')select(null);
-  if(drawing){
+  if(t==='pen'||t==='marker'){
     S.color=t==='marker'?S.markerColor:S.penColor;
     if(t==='marker'&&S.size<12){S.size=18;sizeEl.value=18;}
     if(t==='pen'&&S.size>12){S.size=4;sizeEl.value=4;}
-    sizeVal.textContent=S.size;renderInks();drawPreview();
+  }
+  if(styled){
+    sizeVal.textContent=S.size;renderInks();drawPreview();renderFills();updateDashButtons();
+  }
+  if(t==='path'){
+    document.getElementById('a1Sel').value=S.a1;
+    document.getElementById('a2Sel').value=S.a2;
   }
   applyCursor();drawLive();
 }
 document.querySelectorAll('.tool[data-tool]').forEach(b=>b.onclick=()=>setTool(b.dataset.tool));
-sizeEl.oninput=()=>{S.size=+sizeEl.value;sizeVal.textContent=S.size;drawPreview();};
+document.querySelectorAll('.tool[data-shape]').forEach(b=>b.onclick=()=>{S.shapeKind=b.dataset.shape;setTool('shape');});
+document.querySelectorAll('.tool[data-path]').forEach(b=>b.onclick=()=>{S.pathKind=b.dataset.path;setTool('path');});
+document.getElementById('a1Sel').onchange=e=>{S.a1=+e.target.value;applyStyleToSelection('a1',S.a1);};
+document.getElementById('a2Sel').onchange=e=>{S.a2=+e.target.value;applyStyleToSelection('a2',S.a2);};
+sizeEl.oninput=()=>{S.size=+sizeEl.value;sizeVal.textContent=S.size;drawPreview();applyStyleToSelection('size',S.size);};
 
 function drawPreview(){
   const w=prev.clientWidth||160,h=46;
@@ -1004,14 +1554,36 @@ document.getElementById('title').onclick=async()=>{
   if(S.role!=='teacher')return;
   const t=prompt('Название доски:',document.getElementById('title').textContent);
   if(t===null)return;
-  try{await api('rename',{token:token(),id:S.boardId,title:t});}
+  try{await api('rename',{token:authToken(),id:S.boardId,title:t});}
   catch(e){hint('Не переименовалось: '+e.message);}
 };
 document.getElementById('selDel').onclick=()=>{
-  if(!selected)return;
+  if(!selected||selected.locked)return;
   const it=selected;select(null);
   removeItem(it.id);net.send({t:'erase',ids:[it.id]});
   history.push({type:'erase',items:[it]});redoStack.length=0;drawBoard();
+};
+function duplicateSelected(){
+  if(!selected||selected.locked)return;
+  const src=selected, OFF=20;
+  const clone=BOX_TYPES.has(src.type)
+    ?{...src,id:newId(),x:src.x+OFF,y:src.y+OFF,bbox:null,locked:false}
+    :{...src,id:newId(),pts:src.pts.map(p=>('p' in p)?{x:p.x+OFF,y:p.y+OFF,p:p.p}:{x:p.x+OFF,y:p.y+OFF}),bbox:null,locked:false};
+  addItem(clone);
+  history.push({type:'add',item:clone});redoStack.length=0;
+  net.send({t:'add',item:deflate(clone)});
+  select(clone);
+}
+document.getElementById('selDup').onclick=duplicateSelected;
+document.getElementById('selLock').onclick=()=>{
+  if(!selected)return;
+  const it=selected;
+  const before=snapGeom(it,it);
+  it.locked=!it.locked;
+  const after=snapGeom(it,it);
+  history.push({type:'move',id:it.id,before,after});redoStack.length=0;
+  net.send({t:'move',id:it.id,locked:it.locked});
+  updateSelBar(it);drawLive();
 };
 document.getElementById('toDash').onclick=()=>{location.hash='';};
 document.getElementById('png').onclick=()=>{
@@ -1026,9 +1598,8 @@ document.getElementById('png').onclick=()=>{
   const x=c.getContext('2d');
   x.fillStyle=PAPER;x.fillRect(0,0,c.width,c.height);
   x.setTransform(k,0,0,k,-(b.x0-pad)*k,-(b.y0-pad)*k);
-  for(const it of items)if(it.type==='image'){const e=getImg(it.url);
-    if(e.ready)x.drawImage(e.img,it.x,it.y,it.w,it.h);}
-  for(const it of items)if(it.type!=='image')paintStroke(x,it);
+  for(const it of items)if(BACK_TYPES.has(it.type))paintItem(x,it);
+  for(const it of items)if(!BACK_TYPES.has(it.type))paintItem(x,it);
   c.toBlob(bl=>{const a=document.createElement('a');
     a.href=URL.createObjectURL(bl);
     a.download=(document.getElementById('title').textContent||'doska')+'.png';
@@ -1042,15 +1613,25 @@ addEventListener('keydown',e=>{
   if(e.code==='Space'&&!spaceDown){spaceDown=true;applyCursor();e.preventDefault();}
   if((e.ctrlKey||e.metaKey)&&k==='z'){e.preventDefault();e.shiftKey?redo():undo();return;}
   if((e.ctrlKey||e.metaKey)&&k==='y'){e.preventDefault();redo();return;}
+  if((e.ctrlKey||e.metaKey)&&k==='d'){e.preventDefault();duplicateSelected();return;}
   if(e.ctrlKey||e.metaKey)return;
   if(k==='1')setTool('pen'); if(k==='2')setTool('marker'); if(k==='3')setTool('eraser');
   if(k==='4')setTool('select'); if(k==='5')setTool('hand');
+  if(k==='6')setTool('shape');
+  if(k==='r'){S.shapeKind='rect';setTool('shape');}
+  if(k==='o'){S.shapeKind='ellipse';setTool('shape');}
+  if(k==='l'){S.pathKind='line';setTool('path');}
+  if(k==='a'){S.pathKind='line';S.a2=2;setTool('path');}
+  if(k==='n'){S.pathKind='polyline';setTool('path');}
+  if(k==='c'){S.pathKind='curve';setTool('path');}
+  if(k==='m'){S.pathKind='polygon';setTool('path');}
+  if(k==='enter'&&pathDraft&&pathDraft.mode==='vertex'){e.preventDefault();commitPathDraft();}
   if(k==='g')document.getElementById('gridBtn').click();
   if(k==='0')document.getElementById('home').click();
   if(k==='='||k==='+')zoomAt(board.clientWidth/2,board.clientHeight/2,1.25);
   if(k==='-')zoomAt(board.clientWidth/2,board.clientHeight/2,0.8);
   if((k==='delete'||k==='backspace')&&selected){e.preventDefault();document.getElementById('selDel').click();}
-  if(k==='escape')select(null);
+  if(k==='escape'){abortDraft();select(null);}
 });
 addEventListener('keyup',e=>{if(e.code==='Space'){spaceDown=false;applyCursor();}});
 addEventListener('resize',()=>{resize();if(selected)select(selected);});
@@ -1065,9 +1646,17 @@ const when=ts=>{
 let myBoards=[];
 
 async function loadBoards(){
+  if(!authToken()){
+    document.getElementById('newBoard').classList.add('hidden');
+    document.getElementById('dashSub').textContent='';
+    grid.innerHTML='<div class="empty">Список досок доступен только преподавателю.<br>'+
+      'Откройте доску из личного кабинета на mcko-app — вход туда же откроет ваши доски здесь.</div>';
+    return;
+  }
+  document.getElementById('newBoard').classList.remove('hidden');
   grid.innerHTML='<div class="empty">Загружаю…</div>';
   try{
-    const d=await api('list',{token:token()});
+    const d=await api('list',{token:authToken()});
     myBoards=d.boards||[];
     renderBoards();
   }catch(e){
@@ -1104,12 +1693,12 @@ function renderBoards(){
     el.querySelector('.ren').onclick=async()=>{
       const t=prompt('Название доски:',b.title);
       if(t===null)return;
-      try{await api('rename',{token:token(),id:b.id,title:t});b.title=t.trim()||b.title;renderBoards();}
+      try{await api('rename',{token:authToken(),id:b.id,title:t});b.title=t.trim()||b.title;renderBoards();}
       catch(e){alert('Не получилось: '+e.message);}
     };
     el.querySelector('.del').onclick=async()=>{
       if(!confirm('Удалить доску «'+b.title+'» вместе со всем содержимым?'))return;
-      try{await api('delete',{token:token(),id:b.id});
+      try{await api('delete',{token:authToken(),id:b.id});
         myBoards=myBoards.filter(x=>x.id!==b.id);renderBoards();}
       catch(e){alert('Не получилось: '+e.message);}
     };
@@ -1120,21 +1709,11 @@ document.getElementById('newBoard').onclick=async()=>{
   const t=prompt('Название доски:','Занятие '+when(Date.now()).slice(0,10));
   if(t===null)return;
   try{
-    const d=await api('create',{token:token(),title:t});
+    const d=await api('create',{token:authToken(),title:t});
     myBoards.unshift(d.board);
     location.hash='b='+d.board.id;
   }catch(e){alert('Не получилось: '+e.message);}
 };
-document.getElementById('showToken').onclick=()=>{
-  const cur=token();
-  const v=prompt('Ваш ключ доступа (скопируйте, чтобы открыть эти доски на другом устройстве).\n'+
-    'Чтобы подключиться к другому ключу — вставьте его сюда и нажмите OK:',cur);
-  if(v===null||v.trim()===cur)return;
-  const t=v.trim();
-  if(!/^[a-zA-Z0-9_-]{16,64}$/.test(t))return alert('Это не похоже на ключ доступа.');
-  store.set('doska.token',t);loadBoards();
-};
-
 /* ═══════════════════ маршрутизация ═══════════════════ */
 function askName(){
   return new Promise(resolve=>{
@@ -1167,6 +1746,13 @@ function showBoard(on){
 async function route(){
   const h=new URLSearchParams(location.hash.replace(/^#/,''));
   const id=h.get('b');
+  const tok=h.get('token');
+  if(tok){
+    // токен приходит из mcko-app одноразово при переходе — сохраняем и сразу
+    // убираем из адресной строки, чтобы не остался в истории браузера
+    try{sessionStorage.setItem('doska.authToken',tok);}catch{}
+    history.replaceState(null,'',location.pathname+location.search+(id?('#b='+id):''));
+  }
 
   if(!id){
     net.close();S.boardId=null;select(null);
@@ -1176,16 +1762,6 @@ async function route(){
   }
   if(!S.name)await askName();
   S.boardId=id;
-  const known=myBoards.find(b=>b.id===id);
-  S.boardKey=known?known.key:'';
-  if(!known){                                   // возможно, доска своя, но список ещё не загружен
-    try{
-      const d=await api('list',{token:token()});
-      myBoards=d.boards||[];
-      const k=myBoards.find(b=>b.id===id);
-      if(k)S.boardKey=k.key;
-    }catch{}
-  }
   showBoard(true);
   resize();
   S.cam={x:board.clientWidth/2,y:board.clientHeight/2,z:1};
