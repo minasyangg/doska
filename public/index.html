@@ -270,7 +270,7 @@ const S={tool:'pen',size:4,color:PENS[0],penColor:PENS[0],markerColor:MARKERS[0]
 
 let items=[];                       // всё содержимое доски (линии и картинки)
 const byId=new Map();
-let history=[], redoStack=[];
+let undoStack=[], redoStack=[];
 
 const toWorld=(sx,sy)=>({x:(sx-S.cam.x)/S.cam.z, y:(sy-S.cam.y)/S.cam.z});
 const toScreen=(wx,wy)=>({x:wx*S.cam.z+S.cam.x, y:wy*S.cam.z+S.cam.y});
@@ -748,7 +748,7 @@ const net={
         peers.clear();
         peers.set(m.you.id,{name:m.you.name+' (вы)',color:m.you.color,role:m.you.role});
         for(const p of m.peers)peers.set(p.id,{name:p.name,color:p.color,role:p.role});
-        items=[];byId.clear();history=[];redoStack=[];selected=null;
+        items=[];byId.clear();undoStack=[];redoStack=[];selected=null;
         for(const it of m.items)addItem(inflate(it),true);
         setTitle(m.title);
         applyRole();renderPeers();drawBoard();
@@ -783,7 +783,7 @@ const net={
         }
         break;
       }
-      case 'cleared':items=[];byId.clear();history=[];redoStack=[];select(null);drawBoard();hint('Доска очищена');break;
+      case 'cleared':items=[];byId.clear();undoStack=[];redoStack=[];select(null);drawBoard();hint('Доска очищена');break;
       case 'lock':S.locked=m.on;applyRole();
         hint(m.on?'Преподаватель закрыл доску для рисования':'Рисование снова доступно');break;
       case 'cursor':cursors.set(m.id,{x:m.x,y:m.y,t:performance.now()});drawLive();break;
@@ -1208,7 +1208,7 @@ function endPointer(e){
     const it=dragging.it;
     const before=snapGeom(dragging.start,it), after=snapGeom(it,it);
     if(geomChanged(before,after)){
-      history.push({type:'move',id:it.id,before,after});
+      undoStack.push({type:'move',id:it.id,before,after});
       redoStack.length=0;
       net.send({t:'move',id:it.id,...wireGeom(after)});
     }
@@ -1223,7 +1223,7 @@ function endPointer(e){
                 x:x0,y:y0,w:Math.max(0.5,w0),h:Math.max(0.5,h0),rot:0,
                 color:S.color,size:S.size/S.cam.z,dash:S.dash,fill:S.fill,locked:false};
       addItem(it);
-      history.push({type:'add',item:it});redoStack.length=0;
+      undoStack.push({type:'add',item:it});redoStack.length=0;
       net.send({t:'add',item:deflate(it)});
     }
     drawLive();
@@ -1249,7 +1249,7 @@ function commit(){
   if(!s||!s.pts.length)return;
   net.stream(s);
   addItem(s);
-  history.push({type:'add',item:s});redoStack.length=0;
+  undoStack.push({type:'add',item:s});redoStack.length=0;
   net.send({t:'add',item:deflate(s)});net.sid=null;net.sent=0;
 }
 function abortStroke(){if(current){current=null;drawId=null;net.sid=null;drawLive();}}
@@ -1266,7 +1266,7 @@ function commitPath(kind,pts){
             fill:kind==='polygon'?S.fill:null,
             a1:S.a1||0,a2:S.a2||0,locked:false,bbox:null};
   addItem(it);
-  history.push({type:'add',item:it});redoStack.length=0;
+  undoStack.push({type:'add',item:it});redoStack.length=0;
   net.send({t:'add',item:deflate(it)});
 }
 function commitPathDraft(){
@@ -1291,7 +1291,7 @@ function eraseAt(pt){
 function commitErase(){
   if(!erasedBatch.length)return;
   net.send({t:'erase',ids:erasedBatch.map(i=>i.id)});
-  history.push({type:'erase',items:erasedBatch.slice()});redoStack.length=0;
+  undoStack.push({type:'erase',items:erasedBatch.slice()});redoStack.length=0;
   erasedBatch=[];
 }
 
@@ -1340,7 +1340,7 @@ async function placeImage(blob,screenPt){
     const it={id:newId(),by:S.me&&S.me.id,type:'image',url:data.url,
               x:c.x-w/2,y:c.y-h/2,w,h,rot:0,locked:false};
     addItem(it);
-    history.push({type:'add',item:it});redoStack.length=0;
+    undoStack.push({type:'add',item:it});redoStack.length=0;
     net.send({t:'add',item:deflate(it)});
     setTool('select');select(it);
     hint('Картинка вставлена: тяните за углы, чтобы изменить размер');
@@ -1366,7 +1366,7 @@ stage.addEventListener('drop',e=>{
 
 /* ═══════════════════ отмена ═══════════════════ */
 function undo(){
-  const op=history.pop();if(!op)return;
+  const op=undoStack.pop();if(!op)return;
   if(op.type==='add'){if(selected&&selected.id===op.item.id)select(null);
     removeItem(op.item.id);net.send({t:'erase',ids:[op.item.id]});}
   else if(op.type==='erase'){for(const it of op.items)addItem(it);
@@ -1383,7 +1383,7 @@ function redo(){
     net.send({t:'erase',ids});}
   else{const it=byId.get(op.id);if(it){Object.assign(it,op.after);it.bbox=bboxOf(it);
     net.send({t:'move',id:it.id,...wireGeom(op.after)});}}
-  history.push(op);drawBoard();drawLive();
+  undoStack.push(op);drawBoard();drawLive();
 }
 
 /* ═══════════════════ интерфейс доски ═══════════════════ */
@@ -1402,7 +1402,7 @@ function applyStyleToSelection(key,value){
   selected[key]=value;
   selected.bbox=bboxOf(selected);
   const after=snapGeom(selected,selected);
-  history.push({type:'move',id:selected.id,before,after});redoStack.length=0;
+  undoStack.push({type:'move',id:selected.id,before,after});redoStack.length=0;
   net.send({t:'move',id:selected.id,...wireGeom(after)});
   drawBoard();
 }
@@ -1561,7 +1561,7 @@ document.getElementById('selDel').onclick=()=>{
   if(!selected||selected.locked)return;
   const it=selected;select(null);
   removeItem(it.id);net.send({t:'erase',ids:[it.id]});
-  history.push({type:'erase',items:[it]});redoStack.length=0;drawBoard();
+  undoStack.push({type:'erase',items:[it]});redoStack.length=0;drawBoard();
 };
 function duplicateSelected(){
   if(!selected||selected.locked)return;
@@ -1570,7 +1570,7 @@ function duplicateSelected(){
     ?{...src,id:newId(),x:src.x+OFF,y:src.y+OFF,bbox:null,locked:false}
     :{...src,id:newId(),pts:src.pts.map(p=>('p' in p)?{x:p.x+OFF,y:p.y+OFF,p:p.p}:{x:p.x+OFF,y:p.y+OFF}),bbox:null,locked:false};
   addItem(clone);
-  history.push({type:'add',item:clone});redoStack.length=0;
+  undoStack.push({type:'add',item:clone});redoStack.length=0;
   net.send({t:'add',item:deflate(clone)});
   select(clone);
 }
@@ -1581,7 +1581,7 @@ document.getElementById('selLock').onclick=()=>{
   const before=snapGeom(it,it);
   it.locked=!it.locked;
   const after=snapGeom(it,it);
-  history.push({type:'move',id:it.id,before,after});redoStack.length=0;
+  undoStack.push({type:'move',id:it.id,before,after});redoStack.length=0;
   net.send({t:'move',id:it.id,locked:it.locked});
   updateSelBar(it);drawLive();
 };
@@ -1751,7 +1751,7 @@ async function route(){
     // токен приходит из mcko-app одноразово при переходе — сохраняем и сразу
     // убираем из адресной строки, чтобы не остался в истории браузера
     try{sessionStorage.setItem('doska.authToken',tok);}catch{}
-    // именно window.history: в этой области видимости history — стек отмены (см. ниже)
+    // window.history явно — рядом в этой же области видимости живёт стек отмены
     window.history.replaceState(null,'',location.pathname+location.search+(id?('#b='+id):''));
   }
 
