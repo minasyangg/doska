@@ -1751,7 +1751,8 @@ async function route(){
     // токен приходит из mcko-app одноразово при переходе — сохраняем и сразу
     // убираем из адресной строки, чтобы не остался в истории браузера
     try{sessionStorage.setItem('doska.authToken',tok);}catch{}
-    history.replaceState(null,'',location.pathname+location.search+(id?('#b='+id):''));
+    // именно window.history: в этой области видимости history — стек отмены (см. ниже)
+    window.history.replaceState(null,'',location.pathname+location.search+(id?('#b='+id):''));
   }
 
   if(!id){
