@@ -5,8 +5,13 @@
   "private": true,
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "node --env-file=.env.dev.local server.js"
   },
-  "engines": { "node": ">=18" },
-  "dependencies": { "ws": "^8.18.0" }
+  "engines": {
+    "node": ">=20.6"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
 }

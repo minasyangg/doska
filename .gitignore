@@ -2,3 +2,7 @@ node_modules/
 data/
 .DS_Store
 ecosystem.config.js
+# локальные env с ключами; .env.dev.local.example — шаблон, он коммитится
+.env
+.env*.local
+!.env*.local.example
