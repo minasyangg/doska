@@ -788,8 +788,10 @@ wss.on('connection', (ws, req) => {
         : (String(m.name || s.name || 'Гость').trim().slice(0, 24) || 'Гость');
 
       room.clients.add(ws); room.touched = Date.now();
-      send(ws, { t: 'init', you: peerInfo(ws), title: room.title, locked: room.locked,
-                 anyEdit: room.anyEdit,
+      // uid отдаём только самому себе: клиенту он нужен, чтобы понимать, какие
+      // объекты его собственные, а остальным участникам знать его незачем
+      send(ws, { t: 'init', you: { ...peerInfo(ws), uid: ws.me.uid },
+                 title: room.title, locked: room.locked, anyEdit: room.anyEdit,
                  peers: [...room.clients].filter(c => c !== ws).map(peerInfo), items: room.items });
       broadcast(room, { t: 'peer', peer: peerInfo(ws) }, ws);
       console.log('[' + room.id + '] + ' + ws.me.name + ' (' + cap + ') → ' + room.clients.size);

@@ -71,6 +71,17 @@
     border:1px solid rgba(0,0,0,.06);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;max-width:52vw}
   .selbar{position:fixed;z-index:11;display:none}
   .selbar.show{display:flex}
+  .card.ro{color:#E0A400;font-size:12px;padding:7px 11px}
+  .who{display:flex;align-items:center;gap:8px;color:#7A7368;font-size:12.5px}
+  .who b{color:#1A1C20;font-weight:600}
+  .lnk{background:none;border:0;color:#24468C;cursor:pointer;font-size:12.5px;padding:0;text-decoration:underline}
+  .sheet .row{display:flex;gap:8px;align-items:center;margin-bottom:9px}
+  .sheet .row span{flex:1;font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sheet select{background:var(--panel-2);border:1px solid var(--edge);color:var(--text);
+    border-radius:8px;padding:6px 8px;font-size:12.5px}
+  .sheet .sub{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:16px 0 8px}
+  .sheet .x{background:none;border:0;color:var(--muted);cursor:pointer;font-size:16px;line-height:1;padding:0 4px}
+  .sheet .x:hover{color:#E4796F}
 
   /* ══ список досок ══ */
   #dash{position:fixed;inset:0;z-index:40;background:var(--paper);color:#1A1C20;overflow:auto}
@@ -133,13 +144,34 @@
     </div>
     <div class="drow">
       <button class="btn" id="newBoard">Новая доска</button>
+      <div class="who" id="who"></div>
     </div>
     <div class="grid" id="boardGrid"></div>
     <div class="note" id="dashNote">
-      <b>Как это работает.</b> Список досок привязан к вашему аккаунту преподавателя.
-      Откройте доску из личного кабинета на mcko-app — вход туда же откроет те же доски
-      на любом устройстве. Ученикам вход не нужен — им отправляется только ссылка на доску.
+      <b>Как это работает.</b> Вход общий с mcko-app: та же почта и тот же пароль.
+      Доски живут, пока вы их не удалите. Ученик открывает доску своим аккаунтом —
+      из личного кабинета или войдя здесь, поэтому всегда видно, кто что написал.
+      Чтобы пустить человека без аккаунта, включите на доске гостевую ссылку
+      кнопкой «Доступ».
     </div>
+  </div>
+</section>
+
+<!-- ═══════════ ВХОД ═══════════ -->
+<section id="login" class="hidden">
+  <div class="wrap" style="max-width:430px;padding-top:13vh">
+    <div class="dhead"><h1>Вход на доску</h1></div>
+    <p style="color:#7A7368;font-size:13.5px;line-height:1.6;margin:6px 0 22px">
+      Та же почта и пароль, что в mcko-app. Отдельной регистрации здесь нет.
+    </p>
+    <form id="loginForm">
+      <input id="logEmail" type="email" placeholder="Почта" autocomplete="username"
+             style="width:100%;padding:12px;border:1px solid #E2DCCF;border-radius:10px;margin-bottom:9px;font-size:14px">
+      <input id="logPass" type="password" placeholder="Пароль" autocomplete="current-password"
+             style="width:100%;padding:12px;border:1px solid #E2DCCF;border-radius:10px;margin-bottom:12px;font-size:14px">
+      <button class="btn" id="logGo" type="submit" style="width:100%">Войти</button>
+      <div class="err" id="logErr" style="margin-top:10px;color:#A5342B"></div>
+    </form>
   </div>
 </section>
 
@@ -204,8 +236,10 @@
     <div class="peers" id="peers"></div>
     <button class="mini" id="copy">Ссылка ученику</button>
     <button class="mini" id="lock" hidden>Запретить рисовать</button>
+    <button class="mini" id="gear" hidden title="Доступ к доске">Доступ</button>
     <button class="mini follow" id="follow" hidden>Следовать</button>
   </div>
+  <div class="card ro" id="readonly" hidden>Только просмотр</div>
 </div>
 
 <div class="zoombar card hidden" id="zoombar">
@@ -232,18 +266,25 @@ const store={
   get(k){try{return localStorage.getItem(k);}catch{return null;}},
   set(k,v){try{localStorage.setItem(k,v);}catch{}},
 };
-/* Supabase access-токен учителя — приходит из mcko-app через #token= при
-   переходе на доску (см. route()), живёт в sessionStorage (не localStorage:
-   токен разовый, не должен переживать закрытие вкладки/устройства). */
-function authToken(){
-  try{return sessionStorage.getItem('doska.authToken')||'';}catch{return '';}
-}
-async function api(method,body){
-  const r=await fetch('/api/boards/'+method,{method:'POST',
-    headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+/* Токенов в браузере больше нет: аутентификация — httpOnly-кука, выданная
+   сервером доски. Из JS её не достать и не потерять, поэтому запросам нужно
+   ровно одно — ходить на свой origin. */
+async function api(path,{method='GET',body}={}){
+  const r=await fetch('/api'+path,{method,credentials:'same-origin',
+    headers:body!==undefined?{'content-type':'application/json'}:undefined,
+    body:body!==undefined?JSON.stringify(body):undefined});
+  if(r.status===204)return null;
   const data=await r.json().catch(()=>({error:'сервер ответил не по-человечески'}));
-  if(!r.ok)throw new Error(data.error||('ошибка '+r.status));
+  if(!r.ok){const e=new Error(data.error||('ошибка '+r.status));e.status=r.status;throw e;}
   return data;
+}
+/* Стабильный идентификатор гостя — на нём держится «стереть своё» у того,
+   у кого нет аккаунта. Живёт в localStorage, потому что должен переживать
+   закрытие вкладки: иначе после перезахода гость теряет свои же штрихи. */
+function guestId(){
+  let g=store.get('doska.guest');
+  if(!g||!/^[A-Za-z0-9_-]{8,32}$/.test(g)){g=rnd(16);store.set('doska.guest',g);}
+  return g;
 }
 
 /* ═══════════════════ движок линии ═══════════════════ */
@@ -264,7 +305,8 @@ const GRID_NAMES={grid:'клетка',dots:'точки',lines:'линейка',n
 
 const S={tool:'pen',size:4,color:PENS[0],penColor:PENS[0],markerColor:MARKERS[0],
   cam:{x:0,y:0,z:1},grid:store.get('doska.grid')||'grid',
-  locked:false,role:'student',me:null,following:false,
+  // cap — что мне можно на этой доске: owner | edit | view | none
+  locked:false,cap:'none',anyEdit:false,me:null,you:null,following:false,
   boardId:null,name:store.get('doska.name')||'',
   shapeKind:'rect',fill:null,dash:0,pathKind:'line',a1:0,a2:0};
 
@@ -717,9 +759,10 @@ function applyCursor(){
 /* ═══════════════════ сеть ═══════════════════ */
 const net={
   ws:null,tries:0,sent:0,sid:null,tCur:0,tView:0,
+  // Сокет ходит строго на свой origin: рукопожатие аутентифицируется кукой,
+  // а её на чужой хост браузер не отдаст. Прежняя лазейка ?server= вместе с
+  // этим и потеряла смысл.
   wsUrl(){
-    const q=new URLSearchParams(location.search).get('server');
-    if(q)return q.replace(/^http/,'ws');
     if(location.protocol==='file:')return null;
     return (location.protocol==='https:'?'wss://':'ws://')+location.host;
   },
@@ -729,10 +772,13 @@ const net={
     setConn('wait','Подключаюсь…');
     const ws=new WebSocket(u); this.ws=ws;
     ws.onopen=()=>{this.tries=0;setConn('ok','На связи');
-      ws.send(JSON.stringify({t:'join',room:S.boardId,name:S.name,token:authToken()}));};
+      ws.send(JSON.stringify({t:'join',room:S.boardId,name:S.name}));};
     ws.onmessage=e=>{try{this.on(JSON.parse(e.data));}catch{}};
     ws.onclose=ev=>{
       if(ev.code===4004){setConn('off','Доска удалена');return;}
+      if(ev.code===4003){setConn('off','Доступ к доске закрыт');deniedScreen();return;}
+      // 401 на рукопожатии приходит как обычное закрытие: сессии нет — на вход
+      if(ev.code===1006&&!S.you){nav('/login?next='+encodeURIComponent(location.pathname));return;}
       setConn('off','Связь потеряна, переподключаюсь…');
       this.tries++; setTimeout(()=>{if(S.boardId)this.connect();},Math.min(8000,600*this.tries));
     };
@@ -744,10 +790,10 @@ const net={
   on(m){
     switch(m.t){
       case 'init':{
-        S.me=m.you;S.role=m.you.role;S.locked=m.locked;
+        S.me=m.you;S.cap=m.you.cap;S.locked=m.locked;S.anyEdit=!!m.anyEdit;
         peers.clear();
-        peers.set(m.you.id,{name:m.you.name+' (вы)',color:m.you.color,role:m.you.role});
-        for(const p of m.peers)peers.set(p.id,{name:p.name,color:p.color,role:p.role});
+        peers.set(m.you.id,{name:m.you.name+' (вы)',color:m.you.color,cap:m.you.cap});
+        for(const p of m.peers)peers.set(p.id,{name:p.name,color:p.color,cap:p.cap});
         items=[];byId.clear();undoStack=[];redoStack=[];selected=null;
         for(const it of m.items)addItem(inflate(it),true);
         setTitle(m.title);
@@ -755,8 +801,11 @@ const net={
         hint(m.items.length?('Доска загружена: '+m.items.length+' объектов'):'Доска пустая — можно начинать');
         break;
       }
-      case 'peer':peers.set(m.peer.id,{name:m.peer.name,color:m.peer.color,role:m.peer.role});
-        renderPeers();hint(m.peer.name+' вошёл');break;
+      case 'peer':{
+        const was=peers.get(m.peer.id);
+        peers.set(m.peer.id,{name:m.peer.name,color:m.peer.color,cap:m.peer.cap});
+        renderPeers();if(!was)hint(m.peer.name+' вошёл');break;
+      }
       case 'left':{const p=peers.get(m.id);peers.delete(m.id);cursors.delete(m.id);
         renderPeers();if(p)hint(p.name+' вышел');break;}
       case 'title':setTitle(m.title);break;
@@ -786,6 +835,12 @@ const net={
       case 'cleared':items=[];byId.clear();undoStack=[];redoStack=[];select(null);drawBoard();hint('Доска очищена');break;
       case 'lock':S.locked=m.on;applyRole();
         hint(m.on?'Преподаватель закрыл доску для рисования':'Рисование снова доступно');break;
+      // права могли измениться посреди урока: владелец убрал участника или
+      // понизил его до просмотра — сервер сообщает, не разрывая соединение
+      case 'cap':S.cap=m.cap;applyRole();select(null);
+        hint(m.cap==='view'?'Теперь вы только смотрите':'Права на доске изменились');break;
+      case 'policy':S.anyEdit=!!m.anyEdit;break;
+      case 'denied':deniedScreen();break;
       case 'cursor':cursors.set(m.id,{x:m.x,y:m.y,t:performance.now()});drawLive();break;
       case 'view':{
         if(!S.following)break;
@@ -806,7 +861,7 @@ const net={
   cursor(w){const n=performance.now();if(n-this.tCur<55)return;this.tCur=n;
     this.send({t:'cursor',x:+w.x.toFixed(1),y:+w.y.toFixed(1)});},
   sendView(){
-    if(S.role!=='teacher')return;
+    if(S.cap!=='owner')return;
     const n=performance.now();if(n-this.tView<120)return;this.tView=n;
     this.send({t:'view',cam:{x:S.cam.x,y:S.cam.y,z:S.cam.z},w:board.clientWidth});
   }
@@ -874,9 +929,14 @@ let selected=null,dragging=null,seqNo=0,shapeDraft=null,pathDraft=null;
 
 const newId=()=>(S.me?S.me.id:'x')+'-'+(++seqNo)+'-'+Date.now().toString(36).slice(-4);
 const localXY=e=>{const r=stage.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};};
-const canEdit=()=>S.role==='teacher'||!S.locked;
+// Зеркало серверной проверки: владельца замок доски не касается, наблюдателю
+// нельзя ничего. Сервер всё равно решает сам — здесь только чтобы не давать
+// человеку рисовать то, что через секунду отвалится.
+const canEdit=()=>S.cap==='owner'||(S.cap==='edit'&&!S.locked);
 const eraserR=()=>(11+S.size*0.9)/S.cam.z;
-const mineOnly=it=>S.role==='teacher'||!it.by||!S.me||it.by===S.me.id;
+// by хранит идентификатор человека, а не сокета, — поэтому своё остаётся своим
+// и после переподключения
+const mineOnly=it=>S.cap==='owner'||S.anyEdit||!it.by||(S.me&&it.by===S.me.uid);
 
 function select(it){
   selected=it;
@@ -1327,8 +1387,8 @@ async function placeImage(blob,screenPt){
     hint('Загружаю картинку…');
     const file=await toUploadable(blob);
     const bmp=await createImageBitmap(file);
-    const r=await fetch('/api/upload?board='+encodeURIComponent(S.boardId)+'&token='+encodeURIComponent(authToken()),
-      {method:'POST',headers:{'content-type':file.type},body:file});
+    const r=await fetch('/api/upload?board='+encodeURIComponent(S.boardId),
+      {method:'POST',credentials:'same-origin',headers:{'content-type':file.type},body:file});
     const data=await r.json().catch(()=>({}));
     if(!r.ok)throw new Error(data.error||'ошибка загрузки');
 
@@ -1348,7 +1408,7 @@ async function placeImage(blob,screenPt){
 }
 
 addEventListener('paste',async e=>{
-  if(document.getElementById('dash').classList.contains('hidden')===false)return;
+  if(!S.boardId)return;                       // состояние роутера, а не вид DOM
   if(e.target&&/INPUT|TEXTAREA/.test(e.target.tagName))return;
   const list=[...((e.clipboardData&&e.clipboardData.items)||[])];
   const img=list.find(i=>i.kind==='file'&&i.type.startsWith('image/'));
@@ -1490,26 +1550,44 @@ function renderPeers(){
     const d=document.createElement('div');
     d.className='av';d.style.background=p.color;
     d.textContent=(p.name.trim()[0]||'?').toUpperCase();
-    d.title=p.name+(p.role==='teacher'?' — преподаватель':'');
+    d.title=p.name+(p.cap==='owner'?' — преподаватель':p.cap==='view'?' — только смотрит':'');
     peersEl.appendChild(d);
   }
 }
 function setTitle(t){
   const el=document.getElementById('title');
   el.textContent=t||'Без названия';
-  el.classList.toggle('editable',S.role==='teacher');
-  el.title=S.role==='teacher'?'Нажмите, чтобы переименовать':t;
+  const owner=S.cap==='owner';
+  el.classList.toggle('editable',owner);
+  el.title=owner?'Нажмите, чтобы переименовать':t;
 }
 function applyRole(){
-  const teacher=S.role==='teacher';
-  document.getElementById('lock').hidden=!teacher;
-  document.getElementById('follow').hidden=teacher;
-  document.getElementById('wipe').disabled=!teacher;
+  const owner=S.cap==='owner';
+  document.getElementById('lock').hidden=!owner;
+  document.getElementById('gear').hidden=!owner;
+  document.getElementById('follow').hidden=owner;
+  document.getElementById('wipe').disabled=!owner;
   const lk=document.getElementById('lock');
   lk.classList.toggle('on',S.locked);
   lk.textContent=S.locked?'Рисование запрещено':'Запретить рисовать';
+  // наблюдателю инструменты правки ни к чему — пусть не выглядят рабочими
+  const ro=S.cap==='view';
+  document.getElementById('readonly').hidden=!ro;
+  for(const b of document.querySelectorAll('.dock [data-tool]'))
+    b.disabled=ro&&!['hand','select'].includes(b.dataset.tool);
+  document.getElementById('undo').disabled=ro;
+  document.getElementById('redo').disabled=ro;
+  if(ro&&!['hand','select'].includes(S.tool))setTool('hand');
   setTitle(document.getElementById('title').textContent);
   applyCursor();
+}
+/* Доступ отозвали посреди работы — честно сказать и увести, а не оставлять
+   человека рисовать в пустоту. */
+function deniedScreen(){
+  S.cap='none';S.boardId=null;net.close();
+  showBoard(false);
+  grid.innerHTML='<div class="empty">Доступ к этой доске закрыт её владельцем.</div>';
+  window.history.replaceState(null,'','/');
 }
 function setConn(s,msg){
   const d=document.getElementById('conn');
@@ -1537,7 +1615,7 @@ document.getElementById('gridBtn').onclick=()=>{
 };
 document.getElementById('lock').onclick=()=>net.send({t:'lock',on:!S.locked});
 document.getElementById('wipe').onclick=()=>{
-  if(S.role!=='teacher')return;
+  if(S.cap!=='owner')return;
   if(confirm('Очистить доску у всех участников? Это нельзя отменить.'))net.send({t:'clear'});
 };
 document.getElementById('follow').onclick=e=>{
@@ -1545,16 +1623,18 @@ document.getElementById('follow').onclick=e=>{
   e.currentTarget.classList.toggle('on',S.following);
   hint(S.following?'Вы следуете за преподавателем':'Свободный просмотр');
 };
-document.getElementById('copy').onclick=async()=>{
-  const link=location.origin+location.pathname+'#b='+S.boardId;
-  try{await navigator.clipboard.writeText(link);hint('Ссылка для ученика скопирована');}
-  catch{prompt('Ссылка для ученика:',link);}
-};
+async function copyLink(id,label){
+  const link=location.origin+'/board/'+id;
+  try{await navigator.clipboard.writeText(link);hint(label+' скопирована');}
+  catch{prompt(label+':',link);}
+}
+document.getElementById('copy').onclick=()=>copyLink(S.boardId,'Ссылка на доску');
+document.getElementById('gear').onclick=()=>openSettings(S.boardId);
 document.getElementById('title').onclick=async()=>{
-  if(S.role!=='teacher')return;
+  if(S.cap!=='owner')return;
   const t=prompt('Название доски:',document.getElementById('title').textContent);
   if(t===null)return;
-  try{await api('rename',{token:authToken(),id:S.boardId,title:t});}
+  try{await api('/boards/'+S.boardId,{method:'PATCH',body:{title:t}});}
   catch(e){hint('Не переименовалось: '+e.message);}
 };
 document.getElementById('selDel').onclick=()=>{
@@ -1585,7 +1665,7 @@ document.getElementById('selLock').onclick=()=>{
   net.send({t:'move',id:it.id,locked:it.locked});
   updateSelBar(it);drawLive();
 };
-document.getElementById('toDash').onclick=()=>{location.hash='';};
+document.getElementById('toDash').onclick=()=>nav('/');
 document.getElementById('png').onclick=()=>{
   if(!items.length)return hint('Пусто — сначала что-нибудь напишите');
   let b={x0:Infinity,y0:Infinity,x1:-Infinity,y1:-Infinity};
@@ -1608,7 +1688,7 @@ document.getElementById('png').onclick=()=>{
 
 addEventListener('keydown',e=>{
   if(/INPUT|TEXTAREA/.test((e.target||{}).tagName||''))return;
-  if(!document.getElementById('dash').classList.contains('hidden'))return;
+  if(!S.boardId)return;                       // состояние роутера, а не вид DOM
   const k=e.key.toLowerCase();
   if(e.code==='Space'&&!spaceDown){spaceDown=true;applyCursor();e.preventDefault();}
   if((e.ctrlKey||e.metaKey)&&k==='z'){e.preventDefault();e.shiftKey?redo():undo();return;}
@@ -1638,6 +1718,7 @@ addEventListener('resize',()=>{resize();if(selected)select(selected);});
 
 /* ═══════════════════ список досок ═══════════════════ */
 const dash=document.getElementById('dash');
+const loginEl=document.getElementById('login');
 const grid=document.getElementById('boardGrid');
 const when=ts=>{
   const d=new Date(ts),p=n=>String(n).padStart(2,'0');
@@ -1645,76 +1726,235 @@ const when=ts=>{
 };
 let myBoards=[];
 
+function renderWho(){
+  const el=document.getElementById('who');
+  if(!S.you){el.innerHTML='';return;}
+  el.innerHTML='';
+  const b=document.createElement('b');b.textContent=S.you.name||S.you.email||'';
+  const out=document.createElement('button');out.className='lnk';out.textContent='Выйти';
+  out.onclick=async()=>{
+    try{await api('/auth/logout',{method:'POST'});}catch{}
+    S.you=null;nav('/login');
+  };
+  el.append(b,out);
+}
+
 async function loadBoards(){
-  if(!authToken()){
-    document.getElementById('newBoard').classList.add('hidden');
-    document.getElementById('dashSub').textContent='';
-    grid.innerHTML='<div class="empty">Список досок доступен только преподавателю.<br>'+
-      'Откройте доску из личного кабинета на mcko-app — вход туда же откроет ваши доски здесь.</div>';
-    return;
-  }
-  document.getElementById('newBoard').classList.remove('hidden');
   grid.innerHTML='<div class="empty">Загружаю…</div>';
-  try{
-    const d=await api('list',{token:authToken()});
-    myBoards=d.boards||[];
-    renderBoards();
-  }catch(e){
-    grid.innerHTML='<div class="empty">Сервер не отвечает: '+e.message+
-      '<br><br>Проверьте, что запущен <code>npm start</code>, и обновите страницу.</div>';
-  }
-}
-function renderBoards(){
-  document.getElementById('dashSub').textContent=
-    myBoards.length?(myBoards.length+' шт.'):'';
-  if(!myBoards.length){
-    grid.innerHTML='<div class="empty">Пока ни одной доски.<br>Нажмите «Новая доска» — она сразу откроется, '+
-      'а ссылку для ученика можно скопировать в любой момент.</div>';
+  let d;
+  try{ d=await api('/boards'); }
+  catch(e){
+    if(e.status===401){nav('/login');return;}
+    grid.innerHTML='<div class="empty">Не удалось получить список: '+e.message+'</div>';
     return;
   }
-  grid.innerHTML='';
-  for(const b of myBoards){
-    const el=document.createElement('div');
-    el.className='bcard';
-    el.innerHTML='<h3></h3><div class="when"></div><div class="bacts">'+
-      '<button class="card-act go">Открыть</button>'+
-      '<button class="card-act link">Ссылка ученику</button>'+
-      '<button class="card-act ren">Переименовать</button>'+
-      '<button class="card-act del">Удалить</button></div>';
-    el.querySelector('h3').textContent=b.title;
-    el.querySelector('.when').textContent='изменена '+when(b.updated||b.created);
-    el.querySelector('.go').onclick=()=>{location.hash='b='+b.id;};
-    el.querySelector('.link').onclick=async ev=>{
-      const link=location.origin+location.pathname+'#b='+b.id;
-      try{await navigator.clipboard.writeText(link);ev.target.textContent='Скопировано';
-        setTimeout(()=>ev.target.textContent='Ссылка ученику',1600);}
-      catch{prompt('Ссылка для ученика:',link);}
-    };
-    el.querySelector('.ren').onclick=async()=>{
-      const t=prompt('Название доски:',b.title);
-      if(t===null)return;
-      try{await api('rename',{token:authToken(),id:b.id,title:t});b.title=t.trim()||b.title;renderBoards();}
-      catch(e){alert('Не получилось: '+e.message);}
-    };
-    el.querySelector('.del').onclick=async()=>{
-      if(!confirm('Удалить доску «'+b.title+'» вместе со всем содержимым?'))return;
-      try{await api('delete',{token:authToken(),id:b.id});
-        myBoards=myBoards.filter(x=>x.id!==b.id);renderBoards();}
-      catch(e){alert('Не получилось: '+e.message);}
-    };
-    grid.appendChild(el);
-  }
+  S.you=d.you||S.you;renderWho();
+  myBoards=d.boards||[];
+  // доски создаёт только преподаватель — ученику кнопка ни к чему
+  document.getElementById('newBoard').classList.toggle('hidden',!(S.you&&S.you.role==='teacher'));
+  renderBoards();
 }
+
+function boardCard(b){
+  const el=document.createElement('div');
+  el.className='bcard';
+  el.innerHTML='<h3></h3><div class="when"></div><div class="bacts"></div>';
+  el.querySelector('h3').textContent=b.title;
+  el.querySelector('.when').textContent=
+    (b.mine?'':'ведёт '+(b.ownerName||'преподаватель')+' · ')+'изменена '+when(b.updated||b.created);
+  const acts=el.querySelector('.bacts');
+  const add=(cls,text,fn)=>{
+    const x=document.createElement('button');x.className='card-act '+cls;x.textContent=text;
+    x.onclick=fn;acts.appendChild(x);return x;
+  };
+  add('go','Открыть',()=>nav('/board/'+b.id));
+  add('link','Ссылка',ev=>{
+    copyLink(b.id,'Ссылка на доску');
+    ev.target.textContent='Скопировано';
+    setTimeout(()=>{ev.target.textContent='Ссылка';},1600);
+  });
+  if(b.mine){
+    add('','Доступ',()=>openSettings(b.id));
+    add('del','Удалить',async()=>{
+      if(!confirm('Удалить доску «'+b.title+'» вместе со всем содержимым?'))return;
+      try{ await api('/boards/'+b.id,{method:'DELETE'});
+           myBoards=myBoards.filter(x=>x.id!==b.id);renderBoards(); }
+      catch(e){alert('Не получилось: '+e.message);}
+    });
+  }
+  return el;
+}
+
+function renderBoards(){
+  const mine=myBoards.filter(b=>b.mine);
+  const other=myBoards.filter(b=>!b.mine);
+  document.getElementById('dashSub').textContent=myBoards.length?(myBoards.length+' шт.'):'';
+  grid.innerHTML='';
+  if(!myBoards.length){
+    grid.innerHTML=S.you&&S.you.role==='teacher'
+      ? '<div class="empty">Пока ни одной доски.<br>Нажмите «Новая доска» — она сразу откроется, '+
+        'а ссылку и участников можно добавить в любой момент.</div>'
+      : '<div class="empty">Вас пока не добавили ни на одну доску.<br>'+
+        'Преподаватель откроет её для вас — она появится здесь.</div>';
+    return;
+  }
+  const group=(title,list)=>{
+    if(!list.length)return;
+    if(mine.length&&other.length){
+      const h=document.createElement('div');
+      h.style.cssText='grid-column:1/-1;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#8A8378;margin-top:6px';
+      h.textContent=title;grid.appendChild(h);
+    }
+    for(const b of list)grid.appendChild(boardCard(b));
+  };
+  group(S.you&&S.you.role==='admin'?'Мои доски':'Мои доски',mine);
+  group(S.you&&S.you.role==='admin'?'Доски организации (только просмотр)':'Доски, где я участник',other);
+}
+
 document.getElementById('newBoard').onclick=async()=>{
   const t=prompt('Название доски:','Занятие '+when(Date.now()).slice(0,10));
   if(t===null)return;
   try{
-    const d=await api('create',{token:authToken(),title:t});
-    myBoards.unshift(d.board);
-    location.hash='b='+d.board.id;
+    const d=await api('/boards',{method:'POST',body:{title:t}});
+    nav('/board/'+d.board.id);
   }catch(e){alert('Не получилось: '+e.message);}
 };
+
+/* ═══════════════════ доступ к доске ═══════════════════ */
+/* Лист настроек: участники, гостевая ссылка, правило удаления объектов.
+   Всё, что здесь меняется, проверяется ещё раз на сервере и в RLS. */
+async function openSettings(id){
+  const board=myBoards.find(b=>b.id===id)||{id,title:document.getElementById('title').textContent,
+    guestAccess:'none',objectEditPolicy:'creator'};
+  const m=document.createElement('div');
+  m.className='modal';
+  m.innerHTML='<div class="sheet">'+
+    '<h2>Доступ к доске</h2><p id="stTitle"></p>'+
+    '<div class="sub">Участники</div><div id="stList"></div>'+
+    '<div class="row"><select id="stPick" style="flex:1"></select>'+
+    '<button class="mini" id="stAdd" style="background:#fff;color:#15171A">Добавить</button></div>'+
+    '<div class="sub">Гостевая ссылка</div>'+
+    '<div class="row"><select id="stGuest" style="flex:1">'+
+      '<option value="none">выключена — только по аккаунту</option>'+
+      '<option value="view">по ссылке можно смотреть</option>'+
+      '<option value="edit">по ссылке можно рисовать</option>'+
+    '</select><button class="mini" id="stCopy" style="background:#fff;color:#15171A">Копировать</button></div>'+
+    '<div class="sub">Удаление объектов</div>'+
+    '<div class="row"><select id="stPolicy" style="flex:1">'+
+      '<option value="creator">каждый удаляет только своё</option>'+
+      '<option value="anyone">любой участник удаляет любое</option>'+
+    '</select></div>'+
+    '<button class="btn ghost" id="stClose">Закрыть</button>'+
+    '<div class="err" id="stErr"></div></div>';
+  document.body.appendChild(m);
+  const $=s=>m.querySelector(s);
+  const err=t=>{$('#stErr').textContent=t||'';};
+  $('#stTitle').textContent=board.title;
+  $('#stGuest').value=board.guestAccess||'none';
+  $('#stPolicy').value=board.objectEditPolicy||'creator';
+  $('#stClose').onclick=()=>m.remove();
+  m.onclick=e=>{if(e.target===m)m.remove();};
+
+  let students=[],parts=[];
+  const drawList=()=>{
+    const box=$('#stList');box.innerHTML='';
+    if(!parts.length){
+      const d=document.createElement('div');
+      d.style.cssText='color:#8C9199;font-size:12.5px;margin-bottom:8px';
+      d.textContent='Пока никого. Добавьте своих учеников ниже.';
+      box.appendChild(d);
+    }
+    for(const p of parts){
+      const row=document.createElement('div');row.className='row';
+      const nm=document.createElement('span');nm.textContent=p.name||p.id;
+      const sel=document.createElement('select');
+      sel.innerHTML='<option value="edit">рисует</option><option value="view">смотрит</option>';
+      sel.value=p.access;
+      sel.onchange=async()=>{
+        try{await api('/boards/'+id+'/participants/'+p.id,{method:'PATCH',body:{access:sel.value}});
+            p.access=sel.value;err('');}
+        catch(e){err(e.message);sel.value=p.access;}
+      };
+      const x=document.createElement('button');x.className='x';x.textContent='×';x.title='Убрать';
+      x.onclick=async()=>{
+        try{await api('/boards/'+id+'/participants/'+p.id,{method:'DELETE'});
+            parts=parts.filter(q=>q.id!==p.id);drawList();refreshPick();err('');}
+        catch(e){err(e.message);}
+      };
+      row.append(nm,sel,x);box.appendChild(row);
+    }
+  };
+  const refreshPick=()=>{
+    const has=new Set(parts.map(p=>p.id));
+    const free=students.filter(s=>!has.has(s.id));
+    $('#stPick').innerHTML=free.length
+      ? free.map(s=>'<option value="'+s.id+'">'+(s.full_name||s.id)+(s.grade?' · '+s.grade:'')+'</option>').join('')
+      : '<option value="">все ваши ученики уже добавлены</option>';
+    $('#stAdd').disabled=!free.length;
+  };
+
+  try{
+    const [pr,st]=await Promise.all([api('/boards/'+id+'/participants'),api('/students')]);
+    parts=pr.participants||[];students=st.students||[];
+    drawList();refreshPick();
+  }catch(e){err('Не удалось загрузить участников: '+e.message);}
+
+  $('#stAdd').onclick=async()=>{
+    const who=$('#stPick').value;
+    if(!who)return;
+    try{
+      await api('/boards/'+id+'/participants',{method:'POST',body:{user_id:who,access:'edit'}});
+      const s=students.find(x=>x.id===who)||{};
+      parts.push({id:who,access:'edit',name:s.full_name});
+      drawList();refreshPick();err('');
+    }catch(e){err(e.message);}
+  };
+
+  const patch=async(body,onOk)=>{
+    try{const d=await api('/boards/'+id,{method:'PATCH',body});
+        const b=myBoards.find(x=>x.id===id);
+        if(b&&d.board){b.guestAccess=d.board.guest_access;b.objectEditPolicy=d.board.object_edit_policy;}
+        err('');if(onOk)onOk();}
+    catch(e){err(e.message);}
+  };
+  $('#stGuest').onchange=()=>patch({guest_access:$('#stGuest').value});
+  $('#stPolicy').onchange=()=>patch({object_edit_policy:$('#stPolicy').value});
+
+  $('#stCopy').onclick=async()=>{
+    if($('#stGuest').value==='none'){err('Сначала включите гостевую ссылку');return;}
+    try{
+      let g=(await api('/boards/'+id+'/guest-link')).token;
+      if(!g)g=(await api('/boards/'+id+'/guest-link',{method:'POST'})).token;
+      const link=location.origin+'/board/'+id+'?g='+encodeURIComponent(g);
+      try{await navigator.clipboard.writeText(link);err('');$('#stCopy').textContent='Скопировано';
+          setTimeout(()=>{$('#stCopy').textContent='Копировать';},1600);}
+      catch{prompt('Гостевая ссылка:',link);}
+    }catch(e){err(e.message);}
+  };
+}
+
+/* ═══════════════════ вход ═══════════════════ */
+document.getElementById('loginForm').onsubmit=async e=>{
+  e.preventDefault();
+  const err=document.getElementById('logErr');
+  const btn=document.getElementById('logGo');
+  err.textContent='';btn.disabled=true;btn.textContent='Вхожу…';
+  try{
+    const d=await api('/auth/login',{method:'POST',body:{
+      email:document.getElementById('logEmail').value.trim(),
+      password:document.getElementById('logPass').value
+    }});
+    S.you=d.user;
+    document.getElementById('logPass').value='';
+    const next=new URLSearchParams(location.search).get('next');
+    nav(next&&next.startsWith('/')?next:'/');
+  }catch(ex){err.textContent=ex.message;}
+  finally{btn.disabled=false;btn.textContent='Войти';}
+};
+
 /* ═══════════════════ маршрутизация ═══════════════════ */
+/* Имя спрашиваем только у гостя: у вошедшего оно берётся из профиля mcko-app,
+   и придумывать себе второе имя на доске не нужно. */
 function askName(){
   return new Promise(resolve=>{
     const m=document.createElement('div');
@@ -1736,43 +1976,88 @@ function askName(){
 }
 
 const boardUi=['dock','penPanel','topBar','zoombar','hint'];
-function showBoard(on){
-  dash.classList.toggle('hidden',on);
-  stage.classList.toggle('hidden',!on);
-  for(const id of boardUi)document.getElementById(id).classList.toggle('hidden',!on);
-  if(on&&S.tool!=='pen'&&S.tool!=='marker')document.getElementById('penPanel').classList.add('hidden');
+function showView(what){
+  dash.classList.toggle('hidden',what!=='dash');
+  loginEl.classList.toggle('hidden',what!=='login');
+  stage.classList.toggle('hidden',what!=='board');
+  for(const id of boardUi)document.getElementById(id).classList.toggle('hidden',what!=='board');
+  if(what==='board'&&S.tool!=='pen'&&S.tool!=='marker')
+    document.getElementById('penPanel').classList.add('hidden');
+}
+const showBoard=on=>showView(on?'board':'dash');
+
+/** Переход внутри приложения: настоящий путь, а не хеш. */
+function nav(path){
+  if(location.pathname+location.search!==path)window.history.pushState(null,'',path);
+  route();
 }
 
-async function route(){
-  const h=new URLSearchParams(location.hash.replace(/^#/,''));
-  const id=h.get('b');
-  const tok=h.get('token');
-  if(tok){
-    // токен приходит из mcko-app одноразово при переходе — сохраняем и сразу
-    // убираем из адресной строки, чтобы не остался в истории браузера
-    try{sessionStorage.setItem('doska.authToken',tok);}catch{}
-    // window.history явно — рядом в этой же области видимости живёт стек отмены
-    window.history.replaceState(null,'',location.pathname+location.search+(id?('#b='+id):''));
-  }
-
-  if(!id){
-    net.close();S.boardId=null;select(null);
-    showBoard(false);
-    loadBoards();
-    return;
-  }
-  if(!S.name)await askName();
-  S.boardId=id;
-  showBoard(true);
+async function openBoard(id){
+  if(S.boardId===id&&net.ws)return;
+  net.close();
+  S.boardId=id;S.cap='none';S.me=null;select(null);
+  showView('board');
   resize();
   S.cam={x:board.clientWidth/2,y:board.clientHeight/2,z:1};
   document.getElementById('zoom').textContent='100%';
   hintEl.textContent=HINT_DEFAULT;
   setTool(S.tool==='select'?'pen':S.tool);
   renderInks();drawPreview();drawBoard();
-  net.close();net.connect();
+  net.connect();
 }
-addEventListener('hashchange',route);
+
+async function route(){
+  const p=location.pathname;
+  const qs=new URLSearchParams(location.search);
+
+  if(p==='/login'){
+    net.close();S.boardId=null;
+    showView('login');
+    document.getElementById('logErr').textContent=
+      qs.get('e')==='ticket'?'Ссылка устарела — войдите почтой и паролем.':
+      qs.get('e')==='offline'?'Сервис входа сейчас недоступен, попробуйте позже.':'';
+    return;
+  }
+
+  const mBoard=p.match(/^\/board\/([A-Za-z0-9_-]{1,40})$/);
+  if(mBoard){
+    const id=mBoard[1];
+    const g=qs.get('g');
+    if(g){
+      // гостевая ссылка: меняем её на обычную сессию доски и убираем токен из
+      // адреса, чтобы он не остался в истории и не уехал в Referer
+      if(!S.name)await askName();
+      try{
+        await api('/guest/enter',{method:'POST',body:{board:id,g,name:S.name,guestId:guestId()}});
+      }catch(e){
+        showView('dash');
+        grid.innerHTML='<div class="empty">Ссылка недействительна: '+e.message+'</div>';
+        window.history.replaceState(null,'','/');
+        return;
+      }
+      window.history.replaceState(null,'','/board/'+id);
+      return openBoard(id);
+    }
+    let me=null;
+    try{ me=await api('/auth/me'); }catch{}
+    if(!me){nav('/login?next='+encodeURIComponent('/board/'+id));return;}
+    if(me.user){S.you=me.user;S.name=me.user.name||S.name;}
+    else if(me.guest&&!S.name)S.name=me.guest.name||S.name;
+    if(!S.name)await askName();
+    return openBoard(id);
+  }
+
+  // всё остальное — список досок
+  net.close();S.boardId=null;select(null);
+  let me=null;
+  try{ me=await api('/auth/me'); }catch{}
+  if(!me||!me.user){nav('/login');return;}
+  S.you=me.user;renderWho();
+  showView('dash');
+  loadBoards();
+}
+
+addEventListener('popstate',route);
 route();
 })();
 </script>
