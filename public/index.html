@@ -2007,6 +2007,12 @@ async function openBoard(id){
 }
 
 async function route(){
+  // Ссылки старого вида /#b=<id> уже разошлись ученикам — переводим их на
+  // путь, а не отправляем человека в список гадать, куда он попал.
+  const legacy=location.hash.match(/(?:^|[#&])b=([A-Za-z0-9_-]{1,40})/);
+  if(legacy&&location.pathname==='/'){
+    window.history.replaceState(null,'','/board/'+legacy[1]);
+  }
   const p=location.pathname;
   const qs=new URLSearchParams(location.search);
 
