@@ -32,12 +32,20 @@
   .tool[disabled]{opacity:.3;cursor:default}
   .tool svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
   .sep{height:1px;background:var(--edge);margin:3px 4px}
+  /* выпадашка фигур живёт внутри самой панели инструментов: так она никогда
+     не перекроет панель настроек слева и не требует расчёта координат */
+  .subtools{display:flex;flex-direction:column;gap:4px;padding:4px;
+    background:var(--panel-2);border-radius:10px}
+  .subtools .tool{width:34px;height:34px;border-radius:8px}
+  .subtools .tool svg{width:18px;height:18px}
   .tool:focus-visible,.mini:focus-visible,.ink:focus-visible,.btn:focus-visible,.card-act:focus-visible{outline:2px solid #7AA2FF;outline-offset:2px}
 
   .pen{position:fixed;left:74px;top:50%;transform:translateY(-50%);background:var(--panel);
     border:1px solid var(--edge);border-radius:var(--r);padding:12px;width:186px;display:flex;
     flex-direction:column;gap:11px;box-shadow:0 14px 40px rgba(15,17,20,.28);z-index:10}
   .label{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+  .pen .x{background:none;border:0;color:var(--muted);cursor:pointer;font-size:16px;line-height:1;padding:0 4px}
+  .pen .x:hover{color:#E4796F}
   #preview{width:100%;height:46px;background:var(--paper);border-radius:9px;display:block}
   .inks{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}
   .ink{width:100%;aspect-ratio:1;border-radius:50%;border:2px solid transparent;cursor:pointer;
@@ -172,6 +180,12 @@
       <button class="btn" id="logGo" type="submit" style="width:100%">Войти</button>
       <div class="err" id="logErr" style="margin-top:10px;color:#A5342B"></div>
     </form>
+    <div id="ssoRow" class="hidden" style="margin-top:18px;padding-top:18px;border-top:1px solid #E2DCCF">
+      <button class="btn sec" id="ssoGo" style="width:100%">Войти через МЦКО</button>
+      <p style="color:#8A8378;font-size:12px;line-height:1.55;margin:9px 0 0">
+        Если вы уже открыли личный кабинет МЦКО в этом браузере, пароль спрашивать не будут.
+      </p>
+    </div>
   </div>
 </section>
 
@@ -182,17 +196,20 @@
 </div>
 
 <aside class="dock hidden" id="dock">
-  <button class="tool on" data-tool="pen" title="Карандаш (1)"><svg viewBox="0 0 24 24"><path d="M4 20l4-1 10-10a2.5 2.5 0 0 0-3.5-3.5L4.5 15.5 4 20z"/><path d="M13.5 6.5l4 4"/></svg></button>
-  <button class="tool" data-tool="marker" title="Маркер (2)"><svg viewBox="0 0 24 24"><path d="M9 15l-3 3v2h4l3-3"/><path d="M12 17L7 12l8-8a2.8 2.8 0 0 1 4 4l-7 9z"/></svg></button>
+  <button class="tool on" data-tool="pen" title="Карандаш (1) · правая кнопка — настройки"><svg viewBox="0 0 24 24"><path d="M4 20l4-1 10-10a2.5 2.5 0 0 0-3.5-3.5L4.5 15.5 4 20z"/><path d="M13.5 6.5l4 4"/></svg></button>
+  <button class="tool" data-tool="marker" title="Маркер (2) · правая кнопка — настройки"><svg viewBox="0 0 24 24"><path d="M9 15l-3 3v2h4l3-3"/><path d="M12 17L7 12l8-8a2.8 2.8 0 0 1 4 4l-7 9z"/></svg></button>
   <button class="tool" data-tool="eraser" title="Ластик (3)"><svg viewBox="0 0 24 24"><path d="M8 20h12"/><path d="M15.5 4.5l4 4a2 2 0 0 1 0 2.8L12 19H8l-3.5-3.5a2 2 0 0 1 0-2.8l8.2-8.2a2 2 0 0 1 2.8 0z"/></svg></button>
-  <button class="tool" data-tool="select" title="Выделить (4)"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.5L10.5 19 5 3z"/></svg></button>
+  <button class="tool" data-tool="select" title="Выделить (4) · тяните рамку по пустому месту"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.5L10.5 19 5 3z"/></svg></button>
   <button class="tool" data-tool="hand" title="Рука (5 / пробел)"><svg viewBox="0 0 24 24"><path d="M8 12V5.5a1.5 1.5 0 0 1 3 0V11m0-.5V4.5a1.5 1.5 0 0 1 3 0V11m0-.5v-1a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-2.7L4.6 15a1.6 1.6 0 0 1 2.6-1.8L8 14.5"/></svg></button>
-  <button class="tool" data-shape="rect" title="Прямоугольник (R)"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1.5"/></svg></button>
-  <button class="tool" data-shape="ellipse" title="Эллипс (O)"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="8" ry="6"/></svg></button>
-  <button class="tool" data-path="line" title="Линия (L), стрелка — A"><svg viewBox="0 0 24 24"><path d="M4 20L20 4"/></svg></button>
-  <button class="tool" data-path="polyline" title="Ломаная (N)"><svg viewBox="0 0 24 24"><path d="M4 18l6-10 4 6 6-10"/></svg></button>
-  <button class="tool" data-path="curve" title="Кривая (C)"><svg viewBox="0 0 24 24"><path d="M4 18Q10 4 12 12T20 6"/></svg></button>
-  <button class="tool" data-path="polygon" title="Многоугольник (M)"><svg viewBox="0 0 24 24"><path d="M12 3l8 6-3 10H7L4 9z"/></svg></button>
+  <button class="tool" id="shapesBtn" aria-expanded="false" title="Фигуры и линии (6) — нажмите, чтобы выбрать"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1.5"/></svg></button>
+  <div class="subtools hidden" id="shapesMenu">
+    <button class="tool" data-shape="rect" title="Прямоугольник (R)"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1.5"/></svg></button>
+    <button class="tool" data-shape="ellipse" title="Эллипс (O)"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="8" ry="6"/></svg></button>
+    <button class="tool" data-path="line" title="Линия (L), стрелка — A"><svg viewBox="0 0 24 24"><path d="M4 20L20 4"/></svg></button>
+    <button class="tool" data-path="polyline" title="Ломаная (N)"><svg viewBox="0 0 24 24"><path d="M4 18l6-10 4 6 6-10"/></svg></button>
+    <button class="tool" data-path="curve" title="Кривая (C)"><svg viewBox="0 0 24 24"><path d="M4 18Q10 4 12 12T20 6"/></svg></button>
+    <button class="tool" data-path="polygon" title="Многоугольник (M)"><svg viewBox="0 0 24 24"><path d="M12 3l8 6-3 10H7L4 9z"/></svg></button>
+  </div>
   <div class="sep"></div>
   <button class="tool" id="undo" title="Отменить (Ctrl+Z)"><svg viewBox="0 0 24 24"><path d="M4 10h10a5 5 0 0 1 0 10h-4"/><path d="M8 6l-4 4 4 4"/></svg></button>
   <button class="tool" id="redo" title="Вернуть (Ctrl+Shift+Z)"><svg viewBox="0 0 24 24"><path d="M20 10H10a5 5 0 0 0 0 10h4"/><path d="M16 6l4 4-4 4"/></svg></button>
@@ -205,7 +222,11 @@
 </aside>
 
 <div class="pen hidden" id="penPanel">
-  <div><div class="label" style="margin-bottom:6px">Проба пера</div><canvas id="preview"></canvas></div>
+  <div style="display:flex;align-items:center;gap:6px">
+    <div class="label" id="penTitle" style="flex:1">Перо</div>
+    <button class="x" id="penClose" title="Закрыть (Esc)">×</button>
+  </div>
+  <div><canvas id="preview"></canvas></div>
   <div><div class="label" style="margin-bottom:7px">Цвет</div><div class="inks" id="inks"></div></div>
   <div><div class="label" style="margin-bottom:5px">Толщина <span id="sizeVal" style="color:var(--text)">4</span></div>
     <input type="range" id="size" min="1" max="40" step="0.5" value="4"></div>
@@ -250,6 +271,7 @@
 </div>
 
 <div class="selbar card" id="selbar">
+  <span id="selCount" class="hidden" style="font-size:12px;color:var(--muted);padding:0 4px"></span>
   <button class="mini" id="selDup" title="Дублировать (Ctrl+D)">Дублировать</button>
   <button class="mini" id="selLock" title="Заблокировать позицию">Заблокировать</button>
   <button class="mini" id="selDel">Удалить</button>
@@ -308,7 +330,9 @@ const S={tool:'pen',size:4,color:PENS[0],penColor:PENS[0],markerColor:MARKERS[0]
   // cap — что мне можно на этой доске: owner | edit | view | none
   locked:false,cap:'none',anyEdit:false,me:null,you:null,following:false,
   boardId:null,name:store.get('doska.name')||'',
-  shapeKind:'rect',fill:null,dash:0,pathKind:'line',a1:0,a2:0};
+  shapeKind:'rect',fill:null,dash:0,pathKind:'line',a1:0,a2:0,
+  // настройки инструмента открываются по требованию и закрыты при загрузке
+  panelOpen:false};
 
 let items=[];                       // всё содержимое доски (линии и картинки)
 const byId=new Map();
@@ -694,6 +718,28 @@ function flushLive(){
       }
     }
   }
+  // группа: у каждого объекта своя тонкая рамка, у всей группы — общая.
+  // Ручек нет намеренно: поворот и растяжение группы — отдельная история,
+  // а перенос, копия, замок и удаление работают и без них.
+  if(selection.length>1){
+    lctx.strokeStyle='rgba(47,128,237,.55)';lctx.lineWidth=1;lctx.setLineDash([3,3]);
+    for(const it of selection){
+      const b=bboxOf(it),p0=toScreen(b.x0,b.y0);
+      lctx.strokeRect(p0.x,p0.y,(b.x1-b.x0)*S.cam.z,(b.y1-b.y0)*S.cam.z);
+    }
+    const g=selectionBox(),gp=toScreen(g.x0,g.y0);
+    lctx.strokeStyle='#2F80ED';lctx.lineWidth=1.5;lctx.setLineDash([6,4]);
+    lctx.strokeRect(gp.x-4,gp.y-4,(g.x1-g.x0)*S.cam.z+8,(g.y1-g.y0)*S.cam.z+8);
+    lctx.setLineDash([]);
+  }
+  // рамка протяжки
+  if(marquee){
+    const a=toScreen(marquee.a.x,marquee.a.y), b=toScreen(marquee.b.x,marquee.b.y);
+    const x=Math.min(a.x,b.x),y=Math.min(a.y,b.y),w=Math.abs(b.x-a.x),h=Math.abs(b.y-a.y);
+    lctx.fillStyle='rgba(47,128,237,.10)';lctx.fillRect(x,y,w,h);
+    lctx.strokeStyle='#2F80ED';lctx.lineWidth=1;lctx.setLineDash([4,3]);
+    lctx.strokeRect(x+.5,y+.5,w,h);lctx.setLineDash([]);
+  }
   // кольцо ластика
   if(S.tool==='eraser'&&hoverPt){
     lctx.beginPath();lctx.arc(hoverPt.x,hoverPt.y,eraserR()*S.cam.z,0,6.2832);
@@ -818,7 +864,7 @@ const net={
       }
       case 'add':remoteLive.delete(m.item.id);addItem(inflate(m.item));break;
       case 'bulk':for(const it of m.items)addItem(inflate(it));break;
-      case 'erase':for(const id of m.ids){if(selected&&selected.id===id)select(null);removeItem(id);}drawBoard();break;
+      case 'erase':for(const id of m.ids){dropFromSelection(id);removeItem(id);}drawBoard();break;
       case 'move':{
         const it=byId.get(m.id);
         if(it){
@@ -827,7 +873,7 @@ const net={
             it[k]=(k==='pts')?m.pts.map(a=>a.length>2?{x:a[0],y:a[1],p:a[2]}:{x:a[0],y:a[1]}):m[k];
           }
           it.bbox=bboxOf(it);
-          if(selected&&selected.id===it.id)updateSelBar(it);
+          if(inSelection(it))updateSelBar();
           drawBoard();drawLive();
         }
         break;
@@ -925,7 +971,12 @@ setInterval(()=>{
 let current=null,drawId=null,lastPt=null,lastT=0,pressure=0.45,lastPen=0;
 const pointers=new Map();
 let pinch=null,panning=null,spaceDown=false,erasing=null,erasedBatch=[];
-let selected=null,dragging=null,seqNo=0,shapeDraft=null,pathDraft=null;
+/* selection — что выделено (0, 1 или много объектов), selected — тот самый
+   единственный, если он один. Ручки поворота и растяжения показываются только
+   для одиночного выделения: у группы осмысленны перенос, удаление, копия и
+   смена стиля, а не ресайз общей рамки. */
+let selection=[];
+let selected=null,dragging=null,seqNo=0,shapeDraft=null,pathDraft=null,marquee=null;
 
 const newId=()=>(S.me?S.me.id:'x')+'-'+(++seqNo)+'-'+Date.now().toString(36).slice(-4);
 const localXY=e=>{const r=stage.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};};
@@ -938,25 +989,58 @@ const eraserR=()=>(11+S.size*0.9)/S.cam.z;
 // и после переподключения
 const mineOnly=it=>S.cap==='owner'||S.anyEdit||!it.by||(S.me&&it.by===S.me.uid);
 
-function select(it){
-  selected=it;
-  const bar=document.getElementById('selbar');
-  bar.classList.toggle('show',!!it);
-  if(it){
-    const b=bboxOf(it);
-    const p=toScreen(b.x0,b.y0);
-    bar.style.left=Math.max(8,Math.min(innerWidth-190,p.x))+'px';
-    bar.style.top=Math.max(8,p.y-46)+'px';
-    updateSelBar(it);
-  }
+function selectMany(list){
+  // объект мог быть стёрт другим участником, пока лежал в выделении
+  selection=list.filter(it=>it&&byId.has(it.id));
+  selected=selection.length===1?selection[0]:null;
+  refreshSelBar();
   drawLive();
 }
-function updateSelBar(it){
-  const lockBtn=document.getElementById('selLock');
-  if(!lockBtn)return;
-  lockBtn.textContent=it.locked?'Разблокировать':'Заблокировать';
-  lockBtn.classList.toggle('on',!!it.locked);
+function select(it){ selectMany(it?[it]:[]); }
+/** Общая рамка выделения — по ней рисуется группа и ставится панель действий. */
+function selectionBox(){
+  const b={x0:Infinity,y0:Infinity,x1:-Infinity,y1:-Infinity};
+  for(const it of selection){
+    const q=bboxOf(it);
+    b.x0=Math.min(b.x0,q.x0);b.y0=Math.min(b.y0,q.y0);
+    b.x1=Math.max(b.x1,q.x1);b.y1=Math.max(b.y1,q.y1);
+  }
+  return b;
 }
+function refreshSelBar(){
+  const bar=document.getElementById('selbar');
+  bar.classList.toggle('show',selection.length>0);
+  if(!selection.length)return;
+  const b=selectionBox();
+  const p=toScreen(b.x0,b.y0);
+  bar.style.left=Math.max(8,Math.min(innerWidth-260,p.x))+'px';
+  bar.style.top=Math.max(8,p.y-46)+'px';
+  updateSelBar();
+}
+function updateSelBar(){
+  const lockBtn=document.getElementById('selLock');
+  if(!lockBtn||!selection.length)return;
+  const allLocked=selection.every(it=>it.locked);
+  lockBtn.textContent=allLocked?'Разблокировать':'Заблокировать';
+  lockBtn.classList.toggle('on',allLocked);
+  const cnt=document.getElementById('selCount');
+  cnt.textContent=selection.length>1?selection.length+' объекта':'';
+  cnt.classList.toggle('hidden',selection.length<2);
+}
+/* Область выделения ловит объект, если его рамка пересекается с рамкой
+   протяжки, — так же, как в привычных редакторах: попадать точно вокруг
+   каждого штриха никто не станет. */
+const boxesOverlap=(a,b)=>a.x0<=b.x1&&a.x1>=b.x0&&a.y0<=b.y1&&a.y1>=b.y0;
+function itemsIn(rect){
+  const out=[];
+  for(const it of items){
+    if(!SELECTABLE.has(it.type))continue;
+    if(!mineOnly(it))continue;
+    if(boxesOverlap(bboxOf(it),rect))out.push(it);
+  }
+  return out;
+}
+const inSelection=it=>selection.some(s=>s.id===it.id);
 function itemAt(w){
   const r=6/S.cam.z; // небольшой экранно-постоянный допуск клика — точки штриха дискретны и могут быть реже, чем палец/клик
   for(let i=items.length-1;i>=0;i--){
@@ -1007,6 +1091,12 @@ function handleAt(sp){
     if(Math.abs(sp.x-h.sx)<9&&Math.abs(sp.y-h.sy)<9)return h;
   return null;
 }
+/** Перенос выделенного — одного объекта или всей группы одним жестом. */
+function startMove(w){
+  const list=selection.filter(it=>!it.locked);
+  if(!list.length)return;
+  dragging={mode:'move',list:list.map(it=>({it,start:snapshotItem(it)})),w0:w};
+}
 const OPPOSITE_CORNER={nw:'se',ne:'sw',sw:'ne',se:'nw'};
 /* снимок объекта на начало драга — pts копируются глубоко (это отдельные
    {x,y,p}-объекты), иначе before/after в истории ссылались бы на один
@@ -1016,7 +1106,10 @@ function snapshotItem(it){
 }
 
 stage.addEventListener('pointerdown',e=>{
-  stage.setPointerCapture(e.pointerId);
+  // Захват иногда невозможен (указатель уже отпущен, у устройства отобрали
+  // событие) и бросает NotFoundError. Без try весь обработчик обрывался бы
+  // на первой строке, и жест пропадал целиком.
+  try{stage.setPointerCapture(e.pointerId);}catch{}
   pointers.set(e.pointerId,localXY(e));
   if(e.pointerType==='pen')lastPen=performance.now();
   if(e.pointerType==='touch'&&performance.now()-lastPen<900)return;
@@ -1065,10 +1158,22 @@ stage.addEventListener('pointerdown',e=>{
       return;
     }
     const im=itemAt(w);
+    const add=e.shiftKey||e.ctrlKey||e.metaKey;
     if(im&&mineOnly(im)&&canEdit()){
-      select(im);
-      if(!im.locked)dragging={mode:'move',it:im,start:snapshotItem(im),w0:w};
-    } else select(null);
+      if(add){
+        // Shift/Ctrl — добираем и убираем объекты по одному, не начиная перенос:
+        // иначе тот же жест и добавлял бы, и сразу тащил
+        selectMany(inSelection(im)?selection.filter(s=>s.id!==im.id):selection.concat([im]));
+        return;
+      }
+      if(!inSelection(im))select(im);         // клик по уже выделенной группе её сохраняет
+      startMove(w);
+      return;
+    }
+    // пусто под курсором — тянем рамку выделения
+    if(!add)select(null);
+    if(canEdit())marquee={a:w,b:w};
+    drawLive();
     return;
   }
   if(!canEdit()){hint('Преподаватель закрыл доску для рисования');return;}
@@ -1129,15 +1234,22 @@ stage.addEventListener('pointermove',e=>{
   }
   if(panning){
     S.cam.x=panning.cx+(pt.x-panning.sx);S.cam.y=panning.cy+(pt.y-panning.sy);
-    camChanged();if(selected)select(selected);return;
+    camChanged();refreshSelBar();return;
   }
   if(dragging){
-    const w=toWorld(pt.x,pt.y),it=dragging.it,st=dragging.start;
+    const w=toWorld(pt.x,pt.y);
     if(dragging.mode==='move'){
       const dx=w.x-dragging.w0.x, dy=w.y-dragging.w0.y;
-      if(BOX_TYPES.has(it.type)){ it.x=st.x+dx; it.y=st.y+dy; }
-      else if(Array.isArray(st.pts)) it.pts=st.pts.map(p=>('p' in p)?{x:p.x+dx,y:p.y+dy,p:p.p}:{x:p.x+dx,y:p.y+dy});
-    }else if(dragging.mode==='resize'){
+      for(const m of dragging.list){
+        const t=m.it, s0=m.start;
+        if(BOX_TYPES.has(t.type)){ t.x=s0.x+dx; t.y=s0.y+dy; }
+        else if(Array.isArray(s0.pts)) t.pts=s0.pts.map(p=>('p' in p)?{x:p.x+dx,y:p.y+dy,p:p.p}:{x:p.x+dx,y:p.y+dy});
+        t.bbox=bboxOf(t);
+      }
+      drawBoard();refreshSelBar();drawLive();return;
+    }
+    const it=dragging.it,st=dragging.start;
+    if(dragging.mode==='resize'){
       const corner=dragging.corner, anchor=dragging.anchor;
       if(BOX_TYPES.has(it.type)){
         // Ресайз в локальной (неповёрнутой) системе координат объекта:
@@ -1176,6 +1288,7 @@ stage.addEventListener('pointermove',e=>{
     }
     it.bbox=bboxOf(it);drawBoard();select(it);return;
   }
+  if(marquee){marquee.b=toWorld(pt.x,pt.y);drawLive();return;}
   if(shapeDraft){
     const w=toWorld(pt.x,pt.y);let bx=w.x,by=w.y;
     if(e.shiftKey){
@@ -1265,14 +1378,32 @@ function endPointer(e){
   if(pointers.size<2)pinch=null;
   if(panning){panning=null;applyCursor();}
   if(dragging){
-    const it=dragging.it;
-    const before=snapGeom(dragging.start,it), after=snapGeom(it,it);
-    if(geomChanged(before,after)){
-      undoStack.push({type:'move',id:it.id,before,after});
-      redoStack.length=0;
-      net.send({t:'move',id:it.id,...wireGeom(after)});
+    // перенос группы — одна запись в истории на весь жест, иначе Ctrl+Z
+    // возвращал бы объекты по одному
+    const parts=dragging.list||[{it:dragging.it,start:dragging.start}];
+    const ops=[];
+    for(const m of parts){
+      const before=snapGeom(m.start,m.it), after=snapGeom(m.it,m.it);
+      if(geomChanged(before,after))ops.push({type:'move',id:m.it.id,before,after});
+    }
+    if(ops.length){
+      for(const o of ops)net.send({t:'move',id:o.id,...wireGeom(o.after)});
+      pushUndo(ops);
     }
     dragging=null;
+  }
+  if(marquee){
+    const m=marquee;marquee=null;
+    const rect={x0:Math.min(m.a.x,m.b.x),y0:Math.min(m.a.y,m.b.y),
+                x1:Math.max(m.a.x,m.b.x),y1:Math.max(m.a.y,m.b.y)};
+    // короткий тычок — это снятие выделения, а не выбор всего под точкой
+    if(Math.max(rect.x1-rect.x0,rect.y1-rect.y0)*S.cam.z>=4){
+      const found=itemsIn(rect);
+      const add=e.shiftKey||e.ctrlKey||e.metaKey;
+      selectMany(add?selection.concat(found.filter(it=>!inSelection(it))):found);
+      if(selection.length>1)hint('Выделено объектов: '+selection.length+' · тащите за любой из них');
+    }
+    drawLive();
   }
   if(shapeDraft){
     const d=shapeDraft;shapeDraft=null;
@@ -1316,6 +1447,7 @@ function abortStroke(){if(current){current=null;drawId=null;net.sid=null;drawLiv
 function abortDraft(){
   if(shapeDraft){shapeDraft=null;drawLive();}
   if(pathDraft){pathDraft=null;drawLive();}
+  if(marquee){marquee=null;drawLive();}
 }
 /* коммит новой линии/полилинии/кривой/полигона — общий выход и для
    drag-режима (line/arrow), и для расстановки вершин кликами */
@@ -1362,11 +1494,11 @@ stage.addEventListener('wheel',e=>{
   if(e.shiftKey&&!e.ctrlKey){
     S.cam.y-=e.deltaY*(e.deltaMode===1?18:1);
     S.cam.x-=e.deltaX*(e.deltaMode===1?18:1);
-    camChanged();if(selected)select(selected);return;
+    camChanged();refreshSelBar();return;
   }
   const raw=Math.exp(-e.deltaY*(e.deltaMode===1?0.03:0.0022));
   zoomAt(p.x,p.y,Math.min(1.22,Math.max(0.82,raw)));
-  if(selected)select(selected);
+  refreshSelBar();
 },{passive:false});
 
 /* ═══════════════════ вставка картинок ═══════════════════ */
@@ -1425,25 +1557,39 @@ stage.addEventListener('drop',e=>{
 });
 
 /* ═══════════════════ отмена ═══════════════════ */
-function undo(){
-  const op=undoStack.pop();if(!op)return;
-  if(op.type==='add'){if(selected&&selected.id===op.item.id)select(null);
+/* Одна операция человека = одна запись в истории, даже если она тронула
+   несколько объектов: выделенную группу надо отменять целиком, а не по
+   объекту за нажатие. */
+function pushUndo(ops){
+  undoStack.push(ops.length===1?ops[0]:{type:'batch',ops});
+  redoStack.length=0;
+}
+const dropFromSelection=id=>{if(selection.some(s=>s.id===id))selectMany(selection.filter(s=>s.id!==id));};
+function undoOp(op){
+  if(op.type==='batch'){for(let i=op.ops.length-1;i>=0;i--)undoOp(op.ops[i]);return;}
+  if(op.type==='add'){dropFromSelection(op.item.id);
     removeItem(op.item.id);net.send({t:'erase',ids:[op.item.id]});}
   else if(op.type==='erase'){for(const it of op.items)addItem(it);
     net.send({t:'restore',items:op.items.map(deflate)});}
   else{const it=byId.get(op.id);if(it){Object.assign(it,op.before);it.bbox=bboxOf(it);
     net.send({t:'move',id:it.id,...wireGeom(op.before)});}}
-  redoStack.push(op);drawBoard();drawLive();
 }
-function redo(){
-  const op=redoStack.pop();if(!op)return;
+function redoOp(op){
+  if(op.type==='batch'){for(const o of op.ops)redoOp(o);return;}
   if(op.type==='add'){addItem(op.item);net.send({t:'add',item:deflate(op.item)});}
   else if(op.type==='erase'){const ids=op.items.map(i=>i.id);
-    for(const id of ids){if(selected&&selected.id===id)select(null);removeItem(id);}
+    for(const id of ids){dropFromSelection(id);removeItem(id);}
     net.send({t:'erase',ids});}
   else{const it=byId.get(op.id);if(it){Object.assign(it,op.after);it.bbox=bboxOf(it);
     net.send({t:'move',id:it.id,...wireGeom(op.after)});}}
-  undoStack.push(op);drawBoard();drawLive();
+}
+function undo(){
+  const op=undoStack.pop();if(!op)return;
+  undoOp(op);redoStack.push(op);drawBoard();refreshSelBar();drawLive();
+}
+function redo(){
+  const op=redoStack.pop();if(!op)return;
+  redoOp(op);undoStack.push(op);drawBoard();refreshSelBar();drawLive();
 }
 
 /* ═══════════════════ интерфейс доски ═══════════════════ */
@@ -1457,13 +1603,18 @@ const palette=()=>S.tool==='marker'?MARKERS:PENS;
    для следующего штриха/фигуры. Работает для любого типа, у которого
    есть такое поле (образы, например, поля color/size/fill/dash не имеют). */
 function applyStyleToSelection(key,value){
-  if(!selected||selected.locked||!(key in selected))return;
-  const before=snapGeom(selected,selected);
-  selected[key]=value;
-  selected.bbox=bboxOf(selected);
-  const after=snapGeom(selected,selected);
-  undoStack.push({type:'move',id:selected.id,before,after});redoStack.length=0;
-  net.send({t:'move',id:selected.id,...wireGeom(after)});
+  const ops=[];
+  for(const it of selection){
+    if(it.locked||!(key in it))continue;
+    const before=snapGeom(it,it);
+    it[key]=value;
+    it.bbox=bboxOf(it);
+    const after=snapGeom(it,it);
+    ops.push({type:'move',id:it.id,before,after});
+    net.send({t:'move',id:it.id,...wireGeom(after)});
+  }
+  if(!ops.length)return;
+  pushUndo(ops);
   drawBoard();
 }
 function renderInks(){
@@ -1498,18 +1649,66 @@ function updateDashButtons(){
 document.querySelectorAll('[data-dash]').forEach(b=>{
   b.onclick=()=>{S.dash=+b.dataset.dash;updateDashButtons();applyStyleToSelection('dash',S.dash);};
 });
+/* ── фигуры под одним значком ──────────────────────────────
+   Значок показывает последнюю выбранную фигуру, нажатие открывает список.
+   Горячие клавиши R/O/L/N/C/M работают напрямую, минуя список. */
+const shapesBtn=document.getElementById('shapesBtn'), shapesMenu=document.getElementById('shapesMenu');
+function shapesOpen(on){
+  shapesMenu.classList.toggle('hidden',!on);
+  shapesBtn.setAttribute('aria-expanded',on?'true':'false');
+}
+function syncShapesIcon(){
+  const sel=S.tool==='path'?'[data-path="'+S.pathKind+'"]'
+           :S.tool==='shape'?'[data-shape="'+S.shapeKind+'"]':null;
+  const b=sel&&shapesMenu.querySelector(sel);
+  if(b)shapesBtn.innerHTML=b.innerHTML;
+}
+shapesBtn.onclick=()=>shapesOpen(shapesMenu.classList.contains('hidden'));
+// клик мимо закрывает список; capture — чтобы успеть до обработчиков холста
+document.addEventListener('pointerdown',e=>{
+  if(shapesMenu.classList.contains('hidden'))return;
+  if(shapesMenu.contains(e.target)||shapesBtn.contains(e.target))return;
+  shapesOpen(false);
+},true);
+
+/* ── панель настроек инструмента ───────────────────────────
+   По умолчанию скрыта: холст важнее. Открывается правой кнопкой по значку
+   инструмента и повторным нажатием по уже выбранному. */
+const PEN_TITLE={pen:'Перо',marker:'Маркер',shape:'Фигура',path:'Линия'};
+function updatePenPanel(){
+  const on=S.panelOpen&&STYLED.has(S.tool)&&!!S.boardId;
+  document.getElementById('penPanel').classList.toggle('hidden',!on);
+  if(on)document.getElementById('penTitle').textContent=PEN_TITLE[S.tool]||'Настройки';
+}
+function openPenPanel(){S.panelOpen=true;updatePenPanel();}
+document.getElementById('penClose').onclick=()=>{S.panelOpen=false;updatePenPanel();};
+document.getElementById('dock').addEventListener('contextmenu',e=>{
+  const b=e.target.closest('.tool');
+  if(!b||b.disabled)return;
+  let t=null;
+  if(b.dataset.tool)t=b.dataset.tool;
+  else if(b.dataset.shape){S.shapeKind=b.dataset.shape;t='shape';}
+  else if(b.dataset.path){S.pathKind=b.dataset.path;t='path';}
+  else if(b===shapesBtn)t=S.tool==='path'?'path':'shape';
+  if(!t||!STYLED.has(t))return;          // у ластика, руки и выделения настроек нет
+  e.preventDefault();
+  setTool(t);openPenPanel();
+});
+
 function setTool(t){
   S.tool=t;
   document.querySelectorAll('.tool[data-tool]').forEach(b=>b.classList.toggle('on',b.dataset.tool===t));
   document.querySelectorAll('.tool[data-shape]').forEach(b=>b.classList.toggle('on',t==='shape'&&b.dataset.shape===S.shapeKind));
   document.querySelectorAll('.tool[data-path]').forEach(b=>b.classList.toggle('on',t==='path'&&b.dataset.path===S.pathKind));
+  shapesBtn.classList.toggle('on',t==='shape'||t==='path');
+  syncShapesIcon();
   const styled=STYLED.has(t);
   const fillable=t==='shape'||t==='path';
-  document.getElementById('penPanel').classList.toggle('hidden',!styled);
+  updatePenPanel();
   document.getElementById('fillRow').classList.toggle('hidden',!fillable);
   document.getElementById('dashRow').classList.toggle('hidden',!fillable);
   document.getElementById('arrowRow').classList.toggle('hidden',t!=='path');
-  if(t!=='select')select(null);
+  if(t!=='select'){select(null);marquee=null;}
   if(t==='pen'||t==='marker'){
     S.color=t==='marker'?S.markerColor:S.penColor;
     if(t==='marker'&&S.size<12){S.size=18;sizeEl.value=18;}
@@ -1524,9 +1723,19 @@ function setTool(t){
   }
   applyCursor();drawLive();
 }
-document.querySelectorAll('.tool[data-tool]').forEach(b=>b.onclick=()=>setTool(b.dataset.tool));
-document.querySelectorAll('.tool[data-shape]').forEach(b=>b.onclick=()=>{S.shapeKind=b.dataset.shape;setTool('shape');});
-document.querySelectorAll('.tool[data-path]').forEach(b=>b.onclick=()=>{S.pathKind=b.dataset.path;setTool('path');});
+document.querySelectorAll('.tool[data-tool]').forEach(b=>b.onclick=()=>{
+  // повторное нажатие по уже выбранному инструменту открывает и закрывает его
+  // настройки — иначе про правую кнопку никто не догадается
+  const same=S.tool===b.dataset.tool;
+  setTool(b.dataset.tool);
+  if(same&&STYLED.has(b.dataset.tool)){S.panelOpen=!S.panelOpen;updatePenPanel();}
+});
+document.querySelectorAll('.tool[data-shape]').forEach(b=>b.onclick=()=>{
+  S.shapeKind=b.dataset.shape;setTool('shape');shapesOpen(false);
+});
+document.querySelectorAll('.tool[data-path]').forEach(b=>b.onclick=()=>{
+  S.pathKind=b.dataset.path;setTool('path');shapesOpen(false);
+});
 document.getElementById('a1Sel').onchange=e=>{S.a1=+e.target.value;applyStyleToSelection('a1',S.a1);};
 document.getElementById('a2Sel').onchange=e=>{S.a2=+e.target.value;applyStyleToSelection('a2',S.a2);};
 sizeEl.oninput=()=>{S.size=+sizeEl.value;sizeVal.textContent=S.size;drawPreview();applyStyleToSelection('size',S.size);};
@@ -1575,6 +1784,9 @@ function applyRole(){
   document.getElementById('readonly').hidden=!ro;
   for(const b of document.querySelectorAll('.dock [data-tool]'))
     b.disabled=ro&&!['hand','select'].includes(b.dataset.tool);
+  // фигуры живут под своим значком — их надо гасить отдельно
+  for(const b of document.querySelectorAll('#shapesBtn,#shapesMenu .tool'))b.disabled=ro;
+  if(ro)shapesOpen(false);
   document.getElementById('undo').disabled=ro;
   document.getElementById('redo').disabled=ro;
   if(ro&&!['hand','select'].includes(S.tool))setTool('hand');
@@ -1595,7 +1807,7 @@ function setConn(s,msg){
   d.title=msg;if(msg)hint(msg);
 }
 let hintTimer;const hintEl=document.getElementById('hint');
-const HINT_DEFAULT='колесо — масштаб · Shift+колесо или пробел — панорама · Ctrl+V — вставить скрин';
+const HINT_DEFAULT='колесо — масштаб · пробел — панорама · правая кнопка на инструменте — его настройки';
 function hint(t){
   hintEl.classList.remove('hidden');
   hintEl.textContent=t;clearTimeout(hintTimer);
@@ -1638,32 +1850,43 @@ document.getElementById('title').onclick=async()=>{
   catch(e){hint('Не переименовалось: '+e.message);}
 };
 document.getElementById('selDel').onclick=()=>{
-  if(!selected||selected.locked)return;
-  const it=selected;select(null);
-  removeItem(it.id);net.send({t:'erase',ids:[it.id]});
-  undoStack.push({type:'erase',items:[it]});redoStack.length=0;drawBoard();
+  const list=selection.filter(it=>!it.locked);
+  if(!list.length)return;
+  select(null);
+  const ids=list.map(it=>it.id);
+  for(const id of ids)removeItem(id);
+  net.send({t:'erase',ids});
+  undoStack.push({type:'erase',items:list});redoStack.length=0;drawBoard();
 };
 function duplicateSelected(){
-  if(!selected||selected.locked)return;
-  const src=selected, OFF=20;
-  const clone=BOX_TYPES.has(src.type)
-    ?{...src,id:newId(),x:src.x+OFF,y:src.y+OFF,bbox:null,locked:false}
-    :{...src,id:newId(),pts:src.pts.map(p=>('p' in p)?{x:p.x+OFF,y:p.y+OFF,p:p.p}:{x:p.x+OFF,y:p.y+OFF}),bbox:null,locked:false};
-  addItem(clone);
-  undoStack.push({type:'add',item:clone});redoStack.length=0;
-  net.send({t:'add',item:deflate(clone)});
-  select(clone);
+  const list=selection.filter(it=>!it.locked);
+  if(!list.length)return;
+  const OFF=20, clones=[];
+  for(const src of list){
+    const clone=BOX_TYPES.has(src.type)
+      ?{...src,id:newId(),x:src.x+OFF,y:src.y+OFF,bbox:null,locked:false}
+      :{...src,id:newId(),pts:src.pts.map(p=>('p' in p)?{x:p.x+OFF,y:p.y+OFF,p:p.p}:{x:p.x+OFF,y:p.y+OFF}),bbox:null,locked:false};
+    addItem(clone);
+    net.send({t:'add',item:deflate(clone)});
+    clones.push(clone);
+  }
+  pushUndo(clones.map(item=>({type:'add',item})));
+  selectMany(clones);
 }
 document.getElementById('selDup').onclick=duplicateSelected;
 document.getElementById('selLock').onclick=()=>{
-  if(!selected)return;
-  const it=selected;
-  const before=snapGeom(it,it);
-  it.locked=!it.locked;
-  const after=snapGeom(it,it);
-  undoStack.push({type:'move',id:it.id,before,after});redoStack.length=0;
-  net.send({t:'move',id:it.id,locked:it.locked});
-  updateSelBar(it);drawLive();
+  if(!selection.length)return;
+  const on=!selection.every(it=>it.locked);   // группа блокируется целиком
+  const ops=[];
+  for(const it of selection){
+    if(it.locked===on)continue;
+    const before=snapGeom(it,it);
+    it.locked=on;
+    ops.push({type:'move',id:it.id,before,after:snapGeom(it,it)});
+    net.send({t:'move',id:it.id,locked:on});
+  }
+  if(ops.length)pushUndo(ops);
+  updateSelBar();drawLive();
 };
 document.getElementById('toDash').onclick=()=>nav('/');
 document.getElementById('png').onclick=()=>{
@@ -1694,6 +1917,12 @@ addEventListener('keydown',e=>{
   if((e.ctrlKey||e.metaKey)&&k==='z'){e.preventDefault();e.shiftKey?redo():undo();return;}
   if((e.ctrlKey||e.metaKey)&&k==='y'){e.preventDefault();redo();return;}
   if((e.ctrlKey||e.metaKey)&&k==='d'){e.preventDefault();duplicateSelected();return;}
+  if((e.ctrlKey||e.metaKey)&&k==='a'){
+    e.preventDefault();
+    setTool('select');
+    selectMany(items.filter(it=>SELECTABLE.has(it.type)&&mineOnly(it)));
+    return;
+  }
   if(e.ctrlKey||e.metaKey)return;
   if(k==='1')setTool('pen'); if(k==='2')setTool('marker'); if(k==='3')setTool('eraser');
   if(k==='4')setTool('select'); if(k==='5')setTool('hand');
@@ -1710,11 +1939,11 @@ addEventListener('keydown',e=>{
   if(k==='0')document.getElementById('home').click();
   if(k==='='||k==='+')zoomAt(board.clientWidth/2,board.clientHeight/2,1.25);
   if(k==='-')zoomAt(board.clientWidth/2,board.clientHeight/2,0.8);
-  if((k==='delete'||k==='backspace')&&selected){e.preventDefault();document.getElementById('selDel').click();}
-  if(k==='escape'){abortDraft();select(null);}
+  if((k==='delete'||k==='backspace')&&selection.length){e.preventDefault();document.getElementById('selDel').click();}
+  if(k==='escape'){abortDraft();select(null);shapesOpen(false);S.panelOpen=false;updatePenPanel();}
 });
 addEventListener('keyup',e=>{if(e.code==='Space'){spaceDown=false;applyCursor();}});
-addEventListener('resize',()=>{resize();if(selected)select(selected);});
+addEventListener('resize',()=>{resize();refreshSelBar();});
 
 /* ═══════════════════ список досок ═══════════════════ */
 const dash=document.getElementById('dash');
@@ -1952,6 +2181,40 @@ document.getElementById('loginForm').onsubmit=async e=>{
   finally{btn.disabled=false;btn.textContent='Войти';}
 };
 
+/* Что доска рассказывает о себе до входа. Спрашиваем один раз на загрузку
+   страницы: адрес mcko-app посреди сеанса не меняется. */
+let cfgP=null;
+const config=()=>cfgP||(cfgP=api('/config').catch(()=>({})));
+
+/* Человек пришёл по ссылке на доску, а сессии доски у него нет. Вместо формы
+   входа отправляем его в mcko-app: там он, скорее всего, уже вошёл, и вернётся
+   сюда с готовой сессией, ничего не вводя. Если не вошёл — mcko-app покажет
+   свой вход и после него приведёт обратно на ту же доску.
+
+   Метка в sessionStorage — защита от кольца. Если мы только что оттуда
+   вернулись, а сессии всё равно нет (кука не встала, секреты разъехались),
+   второй раз не отсылаем: показываем свою форму, иначе вкладка будет бесконечно
+   ходить между двумя сайтами.
+   Возвращает 'go' — ушли, 'loop' — только что пробовали, 'off' — не настроено. */
+const SSO_MARK='doska.ssoTry';
+async function mckoEnter(boardId){
+  const c=await config();
+  if(!c||!c.mcko)return 'off';
+  let last=0;try{last=+sessionStorage.getItem(SSO_MARK)||0;}catch{}
+  if(Date.now()-last<30000)return 'loop';
+  try{sessionStorage.setItem(SSO_MARK,String(Date.now()));}catch{}
+  location.replace(c.mcko+'/api/doska/open?b='+encodeURIComponent(boardId||''));
+  return 'go';
+}
+const ssoDone=()=>{try{sessionStorage.removeItem(SSO_MARK);}catch{}};
+document.getElementById('ssoGo').onclick=async()=>{
+  ssoDone();                                   // жмут руками — попытка законная
+  const next=new URLSearchParams(location.search).get('next')||'';
+  const m=next.match(/^\/board\/([A-Za-z0-9_-]{1,40})$/);
+  if(await mckoEnter(m?m[1]:'')!=='go')
+    document.getElementById('logErr').textContent='Переход в МЦКО сейчас недоступен.';
+};
+
 /* ═══════════════════ маршрутизация ═══════════════════ */
 /* Имя спрашиваем только у гостя: у вошедшего оно берётся из профиля mcko-app,
    и придумывать себе второе имя на доске не нужно. */
@@ -1981,8 +2244,8 @@ function showView(what){
   loginEl.classList.toggle('hidden',what!=='login');
   stage.classList.toggle('hidden',what!=='board');
   for(const id of boardUi)document.getElementById(id).classList.toggle('hidden',what!=='board');
-  if(what==='board'&&S.tool!=='pen'&&S.tool!=='marker')
-    document.getElementById('penPanel').classList.add('hidden');
+  shapesOpen(false);
+  updatePenPanel();                 // панель настроек открывается только вручную
 }
 const showBoard=on=>showView(on?'board':'dash');
 
@@ -2019,9 +2282,11 @@ async function route(){
   if(p==='/login'){
     net.close();S.boardId=null;
     showView('login');
+    config().then(c=>document.getElementById('ssoRow').classList.toggle('hidden',!(c&&c.mcko)));
     document.getElementById('logErr').textContent=
       qs.get('e')==='ticket'?'Ссылка устарела — войдите почтой и паролем.':
-      qs.get('e')==='offline'?'Сервис входа сейчас недоступен, попробуйте позже.':'';
+      qs.get('e')==='offline'?'Сервис входа сейчас недоступен, попробуйте позже.':
+      qs.get('e')==='sso'?'Автоматический вход не сработал — войдите почтой и паролем.':'';
     return;
   }
 
@@ -2046,7 +2311,15 @@ async function route(){
     }
     let me=null;
     try{ me=await api('/auth/me'); }catch{}
-    if(!me){nav('/login?next='+encodeURIComponent('/board/'+id));return;}
+    if(!me){
+      // ссылка от учителя у того, кто уже сидит в mcko-app: личность заберём
+      // оттуда, а не будем спрашивать пароль второй раз
+      const r=await mckoEnter(id);
+      if(r==='go')return;
+      nav('/login?next='+encodeURIComponent('/board/'+id)+(r==='loop'?'&e=sso':''));
+      return;
+    }
+    ssoDone();
     if(me.user){S.you=me.user;S.name=me.user.name||S.name;}
     else if(me.guest&&!S.name)S.name=me.guest.name||S.name;
     if(!S.name)await askName();
@@ -2058,6 +2331,7 @@ async function route(){
   let me=null;
   try{ me=await api('/auth/me'); }catch{}
   if(!me||!me.user){nav('/login');return;}
+  ssoDone();
   S.you=me.user;renderWho();
   showView('dash');
   loadBoards();
