@@ -212,6 +212,10 @@ const publicUser = s => s && s.kind === 'user'
    всегда рядом — переживать перезапуск им незачем. */
 const tickets = new Map();
 const SSO_SECRET = process.env.DOSKA_SSO_SECRET || '';
+/* Адрес mcko-app. Нужен ровно для одного: человек пришёл по ссылке на доску,
+   своей сессии у него тут нет — вместо формы входа отправляем его в mcko-app,
+   и если он там уже вошёл, то вернётся сюда уже с сессией и ничего не вводя. */
+const MCKO_URL = (process.env.MCKO_URL || '').replace(/\/+$/, '');
 setInterval(() => {
   const now = Date.now();
   for (const [k, v] of tickets) if (v.until < now) tickets.delete(k);
@@ -578,6 +582,8 @@ const server = http.createServer(async (req, res) => {
       if (req.method !== 'GET' && crossSite(req))
         return reply(res, 403, { error: 'межсайтовый запрос' });
 
+      // единственное, что доска рассказывает о себе до входа
+      if (p === '/api/config')         return reply(res, 200, { mcko: MCKO_URL || null });
       if (p.startsWith('/api/auth/'))  return await handleAuth(req, res, url, p);
       if (p === '/api/sso/ticket')     return await handleSso(req, res, url, p);
       if (p === '/api/guest/enter')    return await handleGuestEnter(req, res);
