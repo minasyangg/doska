@@ -18,6 +18,7 @@ const { WebSocketServer } = require('ws');
 const gotrue  = require('./lib/gotrue');
 const db      = require('./lib/db');
 const session = require('./lib/session');
+const store   = require('./lib/store');        // журнал операций и снимки досок
 const cap_    = require('./lib/capability');   // с подчёркиванием: cap занято под уровень доступа
 
 const PORT     = process.env.PORT || 8080;
@@ -26,10 +27,14 @@ const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const DIR = {
   boards:   path.join(DATA_DIR, 'boards'),
   files:    path.join(DATA_DIR, 'files'),
-  sessions: path.join(DATA_DIR, 'sessions')
+  sessions: path.join(DATA_DIR, 'sessions'),
+  // удалённые доски не стираются, а уезжают сюда: в базе строка тоже лишь
+  // помечается удалённой, и содержимое должно вести себя так же
+  trash:    path.join(DATA_DIR, 'trash')
 };
 for (const d of Object.values(DIR)) fs.mkdirSync(d, { recursive: true });
 session.init(DIR.sessions);
+store.init(DIR);
 
 const MAX_ITEMS   = 80000;
 const MAX_UPLOAD  = 16 * 1024 * 1024;      // 16 МБ на картинку
@@ -39,32 +44,6 @@ const IDLE_UNLOAD = 30 * 60 * 1000;
 /* ═══════════════ вспомогательное ═══════════════ */
 const okId    = s => /^[a-zA-Z0-9_-]{1,40}$/.test(s);
 const rnd     = n => crypto.randomBytes(n * 2).toString('base64url').slice(0, n);
-const boardFile = id => path.join(DIR.boards, id + '.json');
-
-const readJson = async (p, fallback) => {
-  try { return JSON.parse(await fsp.readFile(p, 'utf8')); } catch { return fallback; }
-};
-
-/* Запись во временный файл и rename: голый writeFile рвёт доску пополам, если
-   процесс умрёт посреди записи, а доска — это единственная копия занятия.
-   Очередь по пути нужна, чтобы два сохранения одной доски не переплелись. */
-const writeQueue = new Map();
-function writeJson(p, obj) {
-  const prev = writeQueue.get(p) || Promise.resolve();
-  const next = prev.catch(() => {}).then(async () => {
-    const tmp = p + '.' + rnd(6) + '.tmp';
-    try {
-      await fsp.writeFile(tmp, JSON.stringify(obj));
-      await fsp.rename(tmp, p);
-    } catch (e) {
-      await fsp.unlink(tmp).catch(() => {});
-      throw e;
-    }
-  });
-  writeQueue.set(p, next);
-  next.catch(() => {}).finally(() => { if (writeQueue.get(p) === next) writeQueue.delete(p); });
-  return next;
-}
 
 function reply(res, code, obj) {
   res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
@@ -88,35 +67,44 @@ function readBody(req, limit) {
    замок и правила доступа живут в БД mcko-app (041_doska_boards.sql) и
    приезжают сюда через applyMeta() — файл их лишь кэширует, чтобы комната
    могла подняться, пока БД отвечает. */
+/* Содержимое доски пишется журналом операций со снимками — см. lib/store.js.
+   Раньше на каждое изменение раз в четыре секунды переписывался весь файл
+   целиком: стоимость росла вместе с занятием, а окно потери держалось на
+   четырёх секундах. */
 const rooms = new Map();
-const FILE_V = 4;
 
 async function loadRoom(id) {
   let r = rooms.get(id);
   if (r) return r;
-  const saved = await readJson(boardFile(id), null);
+  const saved = await store.load(id);
   r = {
     id,
-    title: (saved && saved.title) || 'Без названия',
-    items: (saved && Array.isArray(saved.items)) ? saved.items : [],
-    ownerId: (saved && saved.ownerId) || null,
-    locked: !!(saved && saved.locked),
-    anyEdit: !!(saved && saved.anyEdit),
-    clients: new Set(), dirty: false, touched: Date.now()
+    title: saved.title || 'Без названия',
+    items: saved.items,
+    ownerId: saved.ownerId || null,
+    locked: !!saved.locked,
+    anyEdit: !!saved.anyEdit,
+    clients: new Set(), touched: Date.now()
   };
 
   // До v4 поле by хранило идентификатор СОКЕТА, а не человека: после
   // переподключения автор терял права на собственные штрихи. Новых владельцев
   // взять неоткуда, поэтому старое содержимое закрепляем за владельцем доски —
   // он и так может всё, а чужого у него не прибавится.
-  if (saved && (saved.v || 0) < FILE_V && r.items.length) {
+  if ((saved.v || 0) < 4 && r.items.length) {
     for (const it of r.items) it.by = r.ownerId || null;
-    r.dirty = true;
-    console.log('[' + id + '] содержимое переведено в v' + FILE_V + ' (' + r.items.length + ' объектов)');
+    await store.snapshot(id, r);          // переписываем сразу, не полагаясь на журнал
+    console.log('[' + id + '] содержимое переведено в v' + store.SNAP_V + ' (' + r.items.length + ' объектов)');
   }
 
   rooms.set(id, r);
   return r;
+}
+
+/** Изменение содержимого: в память и тут же строкой в журнал. Стоимость —
+    размер правки, а не размер доски. */
+function record(r, op) {
+  store.append(r.id, op);
 }
 
 /** Метаданные из БД перекрывают файловый кэш — источник правды один. */
@@ -127,32 +115,32 @@ function applyMeta(r, row) {
       r.locked !== !!row.locked || r.anyEdit !== anyEdit) {
     r.title = row.title; r.ownerId = row.owner_id;
     r.locked = !!row.locked; r.anyEdit = anyEdit;
-    r.dirty = true;
+    record(r, { t: 'meta', title: r.title, ownerId: r.ownerId, locked: r.locked, anyEdit: r.anyEdit });
   }
   return r;
 }
 
-function persist(r) {
-  const snapshot = { v: FILE_V, title: r.title, ownerId: r.ownerId,
-                     locked: r.locked, anyEdit: r.anyEdit, items: r.items };
-  r.dirty = false;
-  return writeJson(boardFile(r.id), snapshot)
-    // Флаг снимаем только при успехе: иначе одна неудачная запись молча
-    // выключала бы сохранение доски до конца её жизни.
-    .catch(e => { r.dirty = true; console.error('save', r.id, e.message); });
-}
 setInterval(() => {
   const now = Date.now();
   for (const r of [...rooms.values()]) {
-    if (r.dirty) persist(r);
-    if (!r.clients.size && now - r.touched > IDLE_UNLOAD) { collectOrphanFiles(r.id); rooms.delete(r.id); }
+    // снимок делается редко — только когда журнал перерос порог; в остальное
+    // время это просто досброс накопленных строк
+    store.maybeSnapshot(r.id, r).catch(() => {});
+    if (!r.clients.size && now - r.touched > IDLE_UNLOAD) {
+      collectOrphanFiles(r.id);
+      rooms.delete(r.id);
+      store.closeRoom(r.id, r).catch(e => console.error('выгрузка', r.id, e.message));
+    }
   }
 }, SAVE_EVERY);
 
-/** «Изменена» берём из mtime файла содержимого: раньше на каждый штрих
+// корзина: раз в сутки убираем то, что пролежало месяц
+setInterval(() => store.sweepTrash().catch(() => {}), 24 * 3600 * 1000).unref();
+store.sweepTrash().catch(() => {});
+
+/** «Изменена» берём из mtime файлов содержимого: раньше на каждый штрих
     перечитывался и переписывался индекс всех учителей разом. */
-const contentMtime = id =>
-  fsp.stat(boardFile(id)).then(s => s.mtimeMs).catch(() => 0);
+const contentMtime = id => store.mtime(id);
 
 /* ═══════════════ HTTP ═══════════════ */
 const MIME = {
@@ -368,7 +356,9 @@ async function handleBoards(req, res, url, p) {
       const title = str(b.title, 80) || 'Новая доска';
       const row = await db.createBoard(token, { id: 'b' + rnd(10), owner_id: s.uid, title });
       const r = await loadRoom(row.id);
-      applyMeta(r, row); persist(r);
+      applyMeta(r, row);
+      await store.snapshot(row.id, r);      // у новой доски сразу есть снимок
+
       return reply(res, 200, { board: { id: row.id, title: row.title, mine: true } });
     }
     return reply(res, 405, { error: 'не тот метод' });
@@ -412,8 +402,11 @@ async function handleBoards(req, res, url, p) {
       cap_.invalidate(id);
       const r = rooms.get(id);
       if (r) { for (const c of r.clients) c.close(4004, 'доска удалена'); rooms.delete(id); }
-      await fsp.unlink(boardFile(id)).catch(() => {});
-      await fsp.rm(path.join(DIR.files, id), { recursive: true, force: true }).catch(() => {});
+      // В корзину, а не в небытие: в базе строка тоже лишь помечается
+      // удалённой. Раньше здесь стирались и содержимое, и картинки — «мягкое»
+      // удаление на деле было необратимым.
+      const where = await store.trash(id);
+      console.log('[' + id + '] удалена, содержимое в корзине: ' + where);
       return reply(res, 200, { ok: true });
     }
     return reply(res, 405, { error: 'не тот метод' });
@@ -824,8 +817,11 @@ wss.on('connection', (ws, req) => {
         const it = pick(src.type)(src, ws.me.uid);
         if (!it || room.items.some(x => x.id === it.id)) return;
         room.items.push(it);
-        if (room.items.length > MAX_ITEMS) room.items.splice(0, 2000);
-        room.dirty = true;
+        if (room.items.length > MAX_ITEMS) {
+          const dropped = room.items.splice(0, 2000);
+          record(room, { t: 'erase', ids: dropped.map(x => x.id) });
+        }
+        record(room, { t: 'add', item: it });
         broadcast(room, { t: 'add', item: it }, ws);
         return;
       }
@@ -848,7 +844,7 @@ wss.on('connection', (ws, req) => {
         }
         if (!Object.keys(applied).length) return;
         Object.assign(it, applied);
-        room.dirty = true;
+        record(room, { t: 'move', id: it.id, ...applied });
         broadcast(room, { t: 'move', id: it.id, ...applied }, ws);
         return;
       }
@@ -862,7 +858,7 @@ wss.on('connection', (ws, req) => {
           gone.push(it.id); return false;
         });
         if (!gone.length) return;
-        room.dirty = true;
+        record(room, { t: 'erase', ids: gone });
         broadcast(room, { t: 'erase', ids: gone }, ws);
         return;
       }
@@ -875,7 +871,7 @@ wss.on('connection', (ws, req) => {
           if (it && !room.items.some(x => x.id === it.id)) { room.items.push(it); back.push(it); }
         }
         if (!back.length) return;
-        room.dirty = true;
+        record(room, { t: 'bulk', items: back });
         broadcast(room, { t: 'bulk', items: back }, ws);
         return;
       }
@@ -893,7 +889,8 @@ wss.on('connection', (ws, req) => {
 
       case 'lock':
         if (!owner) return;
-        room.locked = !!m.on; room.dirty = true;
+        room.locked = !!m.on;
+        record(room, { t: 'lock', on: room.locked });
         broadcast(room, { t: 'lock', on: room.locked });
         // в БД пишем мимо ответа: замок нужен здесь и сейчас, а строка доски
         // догонит — падение записи не должно ломать урок
@@ -904,7 +901,8 @@ wss.on('connection', (ws, req) => {
 
       case 'clear':
         if (!owner) return;
-        room.items = []; room.dirty = true;
+        room.items = [];
+        record(room, { t: 'clear' });
         broadcast(room, { t: 'cleared' });
         return;
     }
@@ -915,7 +913,10 @@ wss.on('connection', (ws, req) => {
     if (!room) return;
     room.clients.delete(ws);
     broadcast(room, { t: 'left', id: ws.me.sid });
-    if (room.dirty) persist(room);
+    // Ушёл последний — самое время уплотнить: следующая загрузка не будет
+    // проигрывать журнал. Пока кто-то остался, хватит досброса строк.
+    (room.clients.size ? store.flush(room.id) : store.snapshot(room.id, room))
+      .catch(e => console.error('сохранение', room.id, e.message));
     console.log('[' + room.id + '] − ' + ws.me.name + ' → ' + room.clients.size);
   });
 });
@@ -950,8 +951,18 @@ server.listen(PORT, () => {
   console.log('Данные: ' + DATA_DIR);
 });
 
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => {
-  for (const r of rooms.values()) if (r.dirty) persist(r);
-  console.log('\nсохранено, выход');
+/* Выход по сигналу: дописываем журналы и снимаем снимки. Раньше здесь был
+   синхронный по виду, но асинхронный по сути вызов persist — процесс успевал
+   умереть раньше, чем запись доходила до диска. */
+let leaving = false;
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, async () => {
+  if (leaving) return;
+  leaving = true;
+  try {
+    await Promise.all([...rooms.values()].map(r => store.closeRoom(r.id, r)));
+    console.log('\nсохранено, выход');
+  } catch (e) {
+    console.error('сохранение при выходе:', e.message);
+  }
   process.exit(0);
 });
