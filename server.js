@@ -668,6 +668,10 @@ function broadcast(room, o, except) {
 }
 const peerInfo = c => ({ id: c.me.sid, name: c.me.name, cap: c.me.cap, color: c.me.color });
 
+/* Признак принадлежности к группе: общий для всех типов. Пустая строка и
+   мусор превращаются в null — «сам по себе». */
+const clampGroup = v => (typeof v === 'string' && v.trim()) ? v.trim().slice(0, 48) : null;
+
 function cleanStroke(s, by) {
   if (!Array.isArray(s.pts) || !s.pts.length) return null;
   const src = s.pts.slice(0, 12000);
@@ -682,6 +686,7 @@ function cleanStroke(s, by) {
            color: String(s.color || '#1A1C20').slice(0, 24),
            size: Math.min(600, Math.max(0.2, +s.size || 2)),
            pts,
+           g: clampGroup(s.g),
            locked: !!s.locked };
 }
 function cleanImage(im, by) {
@@ -692,6 +697,11 @@ function cleanImage(im, by) {
            w: Math.max(4, Math.min(40000, num(im.w, 200))),
            h: Math.max(4, Math.min(40000, num(im.h, 200))),
            rot: num(im.rot, 0),
+           // картинки рисуются под записями, чтобы вставленный снимок не закрыл
+           // написанное. front поднимает конкретную картинку поверх — но только
+           // если человек попросил об этом явно
+           front: !!im.front,
+           g: clampGroup(im.g),
            locked: !!im.locked };
 }
 
@@ -712,6 +722,7 @@ function cleanShape(s, by) {
            w: Math.max(0.5, Math.min(40000, num(s.w, 100))),
            h: Math.max(0.5, Math.min(40000, num(s.h, 100))),
            rot: num(s.rot, 0),
+           g: clampGroup(s.g),
            locked: !!s.locked,
            ...cleanStyle(s) };
 }
@@ -725,6 +736,7 @@ function cleanPath(p, by) {
   return { id: String(p.id).slice(0, 48), by, type: 'path', kind: p.kind,
            pts: pt.pack(src, 2), closed: p.kind === 'polygon',
            a1: clampArrow(p.a1), a2: clampArrow(p.a2),
+           g: clampGroup(p.g),
            locked: !!p.locked,
            ...cleanStyle(p) };
 }
@@ -749,8 +761,14 @@ const clampPts = (v, it) => {
   }
   return out;
 };
+/* Группа общая для всех типов: правится тем же 'move', что и остальное. */
+const clampG = (v, it) => v === null ? null : (typeof v === 'string' ? clampGroup(v) : it.g);
+
 const PATCH_CLAMP = {
   image: {
+    g: clampG,
+    // поднять картинку поверх записей можно только по прямой просьбе человека
+    front: (v) => !!v,
     x: (v, it) => Number.isFinite(+v) ? +v : it.x,
     y: (v, it) => Number.isFinite(+v) ? +v : it.y,
     w: (v, it) => Math.max(4, Math.min(40000, Number.isFinite(+v) ? +v : it.w)),
@@ -759,12 +777,14 @@ const PATCH_CLAMP = {
     locked: (v) => !!v
   },
   pen: {
+    g: clampG,
     pts: clampPts,
     color: (v, it) => typeof v === 'string' ? v.slice(0, 24) : it.color,
     size: (v, it) => Number.isFinite(+v) ? Math.min(600, Math.max(0.2, +v)) : it.size,
     locked: (v) => !!v
   },
   shape: {
+    g: clampG,
     x: (v, it) => Number.isFinite(+v) ? +v : it.x,
     y: (v, it) => Number.isFinite(+v) ? +v : it.y,
     w: (v, it) => Math.max(0.5, Math.min(40000, Number.isFinite(+v) ? +v : it.w)),
@@ -777,6 +797,7 @@ const PATCH_CLAMP = {
     locked: (v) => !!v
   },
   path: {
+    g: clampG,
     pts: (v, it) => {
       if (!Array.isArray(v)) return it.pts;
       const minPts = it.kind === 'polygon' ? 3 : 2;
@@ -923,6 +944,28 @@ wss.on('connection', (ws, req) => {
         const sentBack = back.map(i => pt.wire(i));
         record(room, { t: 'bulk', items: sentBack });
         broadcast(room, { t: 'bulk', items: sentBack }, ws);
+        return;
+      }
+
+      /* Порядок слоёв. Кто выше кого, решает место в массиве: рисуем по
+         порядку. Двигаем только то, что человеку и так позволено трогать, —
+         иначе через слои можно было бы переставлять чужое. */
+      case 'z': {
+        if (!mayEdit) return;
+        const ids = new Set((m.ids || []).slice(0, 5000).map(String));
+        if (!ids.size) return;
+        const toFront = m.to !== 'back';
+        const picked = [], rest = [];
+        for (const it of room.items) {
+          (ids.has(it.id) && mine(it) && !it.locked ? picked : rest).push(it);
+        }
+        if (!picked.length) return;
+        room.items = toFront ? rest.concat(picked) : picked.concat(rest);
+        const moved = picked.map(x => x.id);
+        record(room, { t: 'z', ids: moved, to: toFront ? 'front' : 'back' });
+        // отправителю тоже: часть объектов могла не пройти (чужие, запертые),
+        // и без ответа его порядок разошёлся бы с общим
+        broadcast(room, { t: 'z', ids: moved, to: toFront ? 'front' : 'back' });
         return;
       }
 

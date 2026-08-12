@@ -79,6 +79,20 @@
     border:1px solid rgba(0,0,0,.06);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;max-width:52vw}
   .selbar{position:fixed;z-index:11;display:none}
   .selbar.show{display:flex}
+  /* меню по правой кнопке: тот же материал, что и панели, но колонкой */
+  .menu{position:fixed;z-index:30;display:none;flex-direction:column;gap:1px;padding:5px;
+        min-width:196px;max-height:calc(100vh - 24px);overflow-y:auto}
+  .menu.show{display:flex}
+  .menu button{border:0;background:transparent;color:var(--text);text-align:left;
+        padding:7px 10px;border-radius:7px;cursor:pointer;font-size:13px;white-space:nowrap;
+        display:flex;justify-content:space-between;gap:18px;align-items:center;width:100%}
+  .menu button:hover:not(:disabled){background:var(--panel-2)}
+  .menu button:disabled{color:var(--muted);opacity:.45;cursor:default}
+  .menu button kbd{font:inherit;font-size:11.5px;color:var(--muted);letter-spacing:.02em}
+  .menu hr{border:0;border-top:1px solid var(--edge);margin:4px 2px}
+  .menu .head{color:var(--muted);font-size:11.5px;padding:4px 10px 2px}
+  .menu button.on{color:var(--text)}
+  .menu button.on::after{content:'✓';color:var(--muted)}
   .card.ro{color:#E0A400;font-size:12px;padding:7px 11px}
   .who{display:flex;align-items:center;gap:8px;color:#7A7368;font-size:12.5px}
   .who b{color:#1A1C20;font-weight:600}
@@ -277,6 +291,8 @@
   <button class="mini" id="selDel">Удалить</button>
 </div>
 
+<div class="menu card" id="menu"></div>
+
 <div class="hint hidden" id="hint"></div>
 
 <script>
@@ -341,7 +357,7 @@ let undoStack=[], redoStack=[];
 const toWorld=(sx,sy)=>({x:(sx-S.cam.x)/S.cam.z, y:(sy-S.cam.y)/S.cam.z});
 const toScreen=(wx,wy)=>({x:wx*S.cam.z+S.cam.x, y:wy*S.cam.z+S.cam.y});
 
-const mkStroke=(type,color,size,id,by)=>({id,by,type,color,size,pts:[],bbox:null,locked:false});
+const mkStroke=(type,color,size,id,by)=>({id,by,type,color,size,pts:[],bbox:null,g:null,locked:false});
 
 function pushPoint(s,wx,wy,p){
   const pts=s.pts;
@@ -539,14 +555,15 @@ function hitTest(it,w,r){
     }
     return true;
   }
-  if(it.type==='path')return hitTestPath(it,w,r);
   if(!Array.isArray(it.pts))return false;
-  for(const p of it.pts)if(Math.hypot(p.x-w.x,p.y-w.y)<r+(it.size||0)/2)return true;
-  return false;
+  // Штрихи проверяются так же, как линии, — по отрезкам. Раньше здесь стояла
+  // проверка расстояния до самих точек: она держалась на том, что перо шлёт их
+  // через 0.35 px, и сломалась, как только штрих стал прореживаться. Клик и
+  // ластик промахивались по середине длинной прямой линии.
+  return hitTestPath(it,w,r);
 }
-/* линия/кривая имеет мало вершин, часто далеко друг от друга — проверка
-   расстояния "точка-сегмент" по всем рёбрам, а не только до самих вершин
-   (в отличие от штрихов, где точек и так много и они близко) */
+/* Расстояние «точка — отрезок» по всем рёбрам, а не до вершин: вершины могут
+   стоять далеко друг от друга, и до середины отрезка от них далеко. */
 function hitTestPath(it,w,r){
   const pts=it.pts,n=pts.length;
   if(n<2)return n===1&&Math.hypot(pts[0].x-w.x,pts[0].y-w.y)<r+(it.size||0)/2;
@@ -638,9 +655,12 @@ function flushBoard(){
   const v=visRect();
   const hit=it=>{const b=it.bbox||(it.bbox=bboxOf(it));
     return!(b.x1<v.x0||b.x0>v.x1||b.y1<v.y0||b.y0>v.y1);};
-  // задний слой (картинки) всегда под записями — чтобы вставленный скрин не закрыл написанное
-  for(const it of items) if(BACK_TYPES.has(it.type)&&hit(it)) paintItem(bctx,it);
-  for(const it of items) if(!BACK_TYPES.has(it.type)&&hit(it)) paintItem(bctx,it);
+  // Картинки идут под записями — чтобы вставленный скрин не закрыл написанное.
+  // Исключение — та, которую человек сам поднял «на передний план»: прямая
+  // просьба сильнее умолчания.
+  const back=it=>BACK_TYPES.has(it.type)&&!it.front;
+  for(const it of items) if(back(it)&&hit(it)) paintItem(bctx,it);
+  for(const it of items) if(!back(it)&&hit(it)) paintItem(bctx,it);
 }
 
 const remoteLive=new Map(), cursors=new Map(), peers=new Map();
@@ -886,6 +906,8 @@ const net={
       case 'cap':S.cap=m.cap;applyRole();select(null);
         hint(m.cap==='view'?'Теперь вы только смотрите':'Права на доске изменились');break;
       case 'policy':S.anyEdit=!!m.anyEdit;break;
+      // порядок слоёв поменял кто-то другой: переставляем у себя так же
+      case 'z':applyZ(m.ids||[],m.to);drawBoard();break;
       // доска упёрлась в потолок объектов. Раньше сервер молча выбрасывал
       // самое старое, и начало занятия исчезало незаметно
       case 'full':hint('Доска заполнена: '+(m.max||0).toLocaleString('ru')+
@@ -926,31 +948,36 @@ const PATCHABLE={
   marker:['pts','color','size','locked']
 };
 
-/* реестры сериализации по типу — новый тип добавляет свою пару функций сюда */
+/* реестры сериализации по типу — новый тип добавляет свою пару функций сюда.
+   g — группа, в которой состоит объект; у картинки ещё front: поднята ли она
+   поверх записей. Оба поля общие и едут вместе со всем остальным. */
 const DEFLATE={
   image:it=>({id:it.id,type:'image',url:it.url,x:+it.x.toFixed(1),y:+it.y.toFixed(1),w:+it.w.toFixed(1),h:+it.h.toFixed(1),
-              rot:+((it.rot||0).toFixed(4)),locked:!!it.locked}),
+              rot:+((it.rot||0).toFixed(4)),front:!!it.front,g:it.g||null,locked:!!it.locked}),
   shape:it=>({id:it.id,type:'shape',kind:it.kind,x:+it.x.toFixed(1),y:+it.y.toFixed(1),w:+it.w.toFixed(1),h:+it.h.toFixed(1),
               rot:+((it.rot||0).toFixed(4)),color:it.color,size:+it.size.toFixed(3),dash:it.dash||0,
-              fill:it.fill||null,locked:!!it.locked}),
+              fill:it.fill||null,g:it.g||null,locked:!!it.locked}),
   path:it=>({id:it.id,type:'path',kind:it.kind,closed:!!it.closed,
              pts:it.pts.map(p=>[+p.x.toFixed(2),+p.y.toFixed(2)]),
              color:it.color,size:+it.size.toFixed(3),dash:it.dash||0,fill:it.fill||null,
-             a1:it.a1||0,a2:it.a2||0,locked:!!it.locked})
+             a1:it.a1||0,a2:it.a2||0,g:it.g||null,locked:!!it.locked})
 };
 const deflateStroke=it=>({id:it.id,type:it.type,color:it.color,size:+it.size.toFixed(3),
-  pts:it.pts.map(p=>[+p.x.toFixed(2),+p.y.toFixed(2),+p.p.toFixed(3)]),locked:!!it.locked});
+  pts:it.pts.map(p=>[+p.x.toFixed(2),+p.y.toFixed(2),+p.p.toFixed(3)]),
+  g:it.g||null,locked:!!it.locked});
 const deflate=it=>(DEFLATE[it.type]||deflateStroke)(it);
 
 const INFLATE={
-  image:raw=>({...raw,rot:raw.rot||0,locked:!!raw.locked,bbox:null}),
-  shape:raw=>({...raw,rot:raw.rot||0,dash:raw.dash||0,fill:raw.fill||null,locked:!!raw.locked,bbox:null}),
+  image:raw=>({...raw,rot:raw.rot||0,front:!!raw.front,g:raw.g||null,locked:!!raw.locked,bbox:null}),
+  shape:raw=>({...raw,rot:raw.rot||0,dash:raw.dash||0,fill:raw.fill||null,g:raw.g||null,locked:!!raw.locked,bbox:null}),
   path:raw=>({...raw,pts:raw.pts.map(a=>({x:a[0],y:a[1]})),closed:!!raw.closed,
-              dash:raw.dash||0,fill:raw.fill||null,a1:raw.a1||0,a2:raw.a2||0,locked:!!raw.locked,bbox:null})
+              dash:raw.dash||0,fill:raw.fill||null,a1:raw.a1||0,a2:raw.a2||0,
+              g:raw.g||null,locked:!!raw.locked,bbox:null})
 };
 function inflateStroke(raw){
   const s=mkStroke(raw.type,raw.color,raw.size,raw.id,raw.by);
   s.pts=raw.pts.map(a=>({x:a[0],y:a[1],p:a[2]}));
+  s.g=raw.g||null;
   s.locked=!!raw.locked;
   return s;
 }
@@ -1127,7 +1154,11 @@ stage.addEventListener('pointerdown',e=>{
 
   const pt=localXY(e), w=toWorld(pt.x,pt.y);
   if(S.tool==='hand'||spaceDown||e.button===1||e.button===2){
-    panning={sx:pt.x,sy:pt.y,cx:S.cam.x,cy:S.cam.y};applyCursor();return;
+    // Правая кнопка делает два дела: тянет холст и открывает меню. Различаем по
+    // тому, сдвинулась ли рука: потянули — панорама, щёлкнули на месте — меню.
+    panning={sx:pt.x,sy:pt.y,cx:S.cam.x,cy:S.cam.y,
+             menu:e.button===2?{sx:pt.x,sy:pt.y,t:performance.now()}:null};
+    applyCursor();return;
   }
   if(e.button!==0&&e.pointerType==='mouse')return;
 
@@ -1170,7 +1201,9 @@ stage.addEventListener('pointerdown',e=>{
         selectMany(inSelection(im)?selection.filter(s=>s.id!==im.id):selection.concat([im]));
         return;
       }
-      if(!inSelection(im))select(im);         // клик по уже выделенной группе её сохраняет
+      // клик по уже выделенной группе её сохраняет; объекты одной группы
+      // берутся вместе
+      if(!inSelection(im))selectMany(withGroup([im]));
       startMove(w);
       return;
     }
@@ -1380,7 +1413,24 @@ function wireGeom(g){
 function endPointer(e){
   pointers.delete(e.pointerId);
   if(pointers.size<2)pinch=null;
-  if(panning){panning=null;applyCursor();}
+  if(panning){
+    const m=panning.menu;
+    panning=null;applyCursor();
+    if(m){
+      const pt=localXY(e);
+      const still=Math.hypot(pt.x-m.sx,pt.y-m.sy)<5;
+      if(still){
+        const w=toWorld(pt.x,pt.y);
+        // щёлкнули по объекту вне выделения — сперва выделяем его, как это
+        // делают все редакторы, иначе меню относилось бы непонятно к чему
+        const under=itemAt(w);
+        if(under&&mineOnly(under)&&!inSelection(under))selectMany(withGroup([under]));
+        else if(!under)select(null);
+        openMenu({x:e.clientX,y:e.clientY},w);
+        return;
+      }
+    }
+  }
   if(dragging){
     // перенос группы — одна запись в истории на весь жест, иначе Ctrl+Z
     // возвращал бы объекты по одному
@@ -1957,6 +2007,211 @@ function duplicateSelected(){
   selectMany(clones);
 }
 document.getElementById('selDup').onclick=duplicateSelected;
+
+/* ═══════════════════ группы, слои, буфер ═══════════════════ */
+
+/** Объекты одной группы ходят вместе: выделили один — выделились все. */
+function withGroup(list){
+  const gs=new Set(list.map(it=>it.g).filter(Boolean));
+  if(!gs.size)return list;
+  const out=new Map(list.map(it=>[it.id,it]));
+  for(const it of items) if(it.g&&gs.has(it.g)) out.set(it.id,it);
+  return [...out.values()];
+}
+
+function groupSelected(){
+  const list=selection.filter(it=>!it.locked);
+  if(list.length<2)return hint('Для группы нужно хотя бы два объекта');
+  const g=newId();
+  const ops=[];
+  for(const it of list){
+    const before=snapGeom(it,it);
+    it.g=g;
+    ops.push({type:'move',id:it.id,before,after:snapGeom(it,it)});
+    net.send({t:'move',id:it.id,g});
+  }
+  pushUndo(ops);selectMany(list);drawLive();
+  hint('Объекты сгруппированы: теперь двигаются вместе');
+}
+function ungroupSelected(){
+  const list=selection.filter(it=>it.g&&!it.locked);
+  if(!list.length)return;
+  const ops=[];
+  for(const it of list){
+    const before=snapGeom(it,it);
+    it.g=null;
+    ops.push({type:'move',id:it.id,before,after:snapGeom(it,it)});
+    net.send({t:'move',id:it.id,g:null});
+  }
+  pushUndo(ops);drawLive();hint('Группа разобрана');
+}
+
+/** Перестановка слоёв у себя — тем же правилом, что и на сервере. */
+function applyZ(ids,to){
+  const set=new Set(ids);
+  const picked=[],rest=[];
+  for(const it of items)(set.has(it.id)?picked:rest).push(it);
+  if(!picked.length)return;
+  items.length=0;
+  items.push(...(to==='back'?picked.concat(rest):rest.concat(picked)));
+}
+function moveLayer(to){
+  const list=withGroup(selection).filter(it=>!it.locked);
+  if(!list.length)return;
+  const ids=list.map(it=>it.id);
+  // Картинка по умолчанию живёт под записями. «На передний план» поднимает её
+  // и оттуда, «на задний» — возвращает обратно.
+  const ops=[];
+  for(const it of list){
+    if(!BACK_TYPES.has(it.type))continue;
+    const want=to==='front';
+    if(!!it.front===want)continue;
+    const before=snapGeom(it,it);
+    it.front=want;
+    ops.push({type:'move',id:it.id,before,after:snapGeom(it,it)});
+    net.send({t:'move',id:it.id,front:want});
+  }
+  if(ops.length)pushUndo(ops);
+  applyZ(ids,to);
+  net.send({t:'z',ids,to});
+  drawBoard();
+  hint(to==='front'?'Поднято на передний план':'Убрано на задний план');
+}
+
+/* Буфер обмена доски. Системный тут не годится: в нём нельзя хранить наши
+   объекты, а картинку из него мы и так умеем принимать (см. вставку). */
+let clipboard=[];
+function copySelected(cut){
+  const list=withGroup(selection);
+  if(!list.length)return;
+  clipboard=list.map(deflate);
+  hint((cut?'Вырезано: ':'Скопировано: ')+list.length+
+       (list.length===1?' объект':' объекта'));
+  if(cut){
+    const alive=list.filter(it=>!it.locked);
+    if(!alive.length)return;
+    select(null);
+    const ids=alive.map(it=>it.id);
+    for(const id of ids)removeItem(id);
+    net.send({t:'erase',ids});
+    undoStack.push({type:'erase',items:alive});redoStack.length=0;drawBoard();
+  }
+}
+function pasteClipboard(at){
+  if(!clipboard.length)return hint('Буфер пуст');
+  if(!canEdit())return hint('Преподаватель закрыл доску для правок');
+  // Кладём так, чтобы левый верхний угол скопированного оказался под курсором,
+  // а если курсора нет — со смещением, как у дубликата.
+  const raws=clipboard.map(r=>inflate({...r}));
+  let dx=20,dy=20;
+  if(at){
+    const b={x0:Infinity,y0:Infinity};
+    for(const it of raws){const q=bboxOf(it);b.x0=Math.min(b.x0,q.x0);b.y0=Math.min(b.y0,q.y0);}
+    dx=at.x-b.x0;dy=at.y-b.y0;
+  }
+  // группы сохраняются, но получают новые имена: иначе копия слиплась бы с оригиналом
+  const gmap=new Map();
+  const clones=[];
+  for(const it of raws){
+    const g=it.g?(gmap.get(it.g)||gmap.set(it.g,newId()).get(it.g)):null;
+    const clone=BOX_TYPES.has(it.type)
+      ?{...it,id:newId(),by:S.me&&S.me.id,x:it.x+dx,y:it.y+dy,g,bbox:null,locked:false}
+      :{...it,id:newId(),by:S.me&&S.me.id,g,bbox:null,locked:false,
+        pts:it.pts.map(p=>('p' in p)?{x:p.x+dx,y:p.y+dy,p:p.p}:{x:p.x+dx,y:p.y+dy})};
+    addItem(clone);
+    net.send({t:'add',item:deflate(clone)});
+    clones.push(clone);
+  }
+  pushUndo(clones.map(item=>({type:'add',item})));
+  selectMany(clones);
+  hint('Вставлено: '+clones.length+(clones.length===1?' объект':' объекта'));
+}
+
+/* ═══════════════════ меню по правой кнопке ═══════════════════
+   Собирается заново на каждое открытие: пунктов немного, а держать их разметку
+   в актуальном состоянии постоянно — лишний труд на каждое выделение. */
+const menuEl=document.getElementById('menu');
+let menuAt=null;                                   // где щёлкнули, в мировых
+
+function closeMenu(){menuEl.classList.remove('show');menuEl.innerHTML='';menuAt=null;}
+
+function menuItem(label,hotkey,fn,{off,on}={}){
+  const b=document.createElement('button');
+  b.textContent=label;
+  if(hotkey){const k=document.createElement('kbd');k.textContent=hotkey;b.appendChild(k);}
+  if(off)b.disabled=true; else b.onclick=()=>{closeMenu();fn();};
+  if(on)b.classList.add('on');
+  menuEl.appendChild(b);
+  return b;
+}
+const menuSep=()=>menuEl.appendChild(document.createElement('hr'));
+function menuHead(text){
+  const d=document.createElement('div');d.className='head';d.textContent=text;
+  menuEl.appendChild(d);
+}
+
+function openMenu(screenPt,worldPt){
+  closeMenu();
+  menuAt=worldPt;
+  const edit=canEdit();
+  const sel=selection.length;
+  const unlocked=selection.filter(it=>!it.locked).length;
+  const grouped=selection.some(it=>it.g);
+
+  if(sel){
+    menuItem('Дублировать','Ctrl+D',duplicateSelected,{off:!edit||!unlocked});
+    menuItem('Копировать','Ctrl+C',()=>copySelected(false));
+    menuItem('Вырезать','Ctrl+X',()=>copySelected(true),{off:!edit||!unlocked});
+    menuItem('Вставить','Ctrl+V',()=>pasteClipboard(worldPt),{off:!edit||!clipboard.length});
+    menuSep();
+    menuItem('Группировать','Ctrl+G',groupSelected,{off:!edit||selection.length<2});
+    menuItem('Разгруппировать','Ctrl+Shift+G',ungroupSelected,{off:!edit||!grouped});
+    menuSep();
+    menuItem('На передний план',']',()=>moveLayer('front'),{off:!edit||!unlocked});
+    menuItem('На задний план','[',()=>moveLayer('back'),{off:!edit||!unlocked});
+    menuSep();
+    const allLocked=selection.every(it=>it.locked);
+    menuItem(allLocked?'Разблокировать':'Заблокировать','',
+      ()=>document.getElementById('selLock').click(),{off:!edit});
+    menuItem('Удалить','Del',()=>document.getElementById('selDel').click(),
+      {off:!edit||!unlocked});
+  }else{
+    menuItem('Вставить','Ctrl+V',()=>pasteClipboard(worldPt),{off:!edit||!clipboard.length});
+    menuItem('Выделить всё','Ctrl+A',selectAll,{off:!edit});
+    menuSep();
+    menuHead('Фон');
+    for(const mode of GRID_MODES){
+      menuItem(GRID_NAMES[mode][0].toUpperCase()+GRID_NAMES[mode].slice(1),'',
+        ()=>setGrid(mode),{on:S.grid===mode});
+    }
+  }
+
+  // Показать, измерить, при нужде отразить от края — иначе меню у правого
+  // или нижнего края уезжает за экран.
+  menuEl.classList.add('show');
+  const r=menuEl.getBoundingClientRect();
+  const x=Math.max(6,Math.min(innerWidth-r.width-6,screenPt.x));
+  const y=Math.max(6,Math.min(innerHeight-r.height-6,screenPt.y));
+  menuEl.style.left=x+'px';
+  menuEl.style.top=y+'px';
+}
+
+function selectAll(){
+  const list=items.filter(it=>SELECTABLE.has(it.type)&&mineOnly(it));
+  if(!list.length)return hint('Выделять нечего');
+  setTool('select');selectMany(list);
+  hint('Выделено: '+list.length+(list.length===1?' объект':' объекта'));
+}
+function setGrid(mode){
+  S.grid=mode;store.set('doska.grid',mode);
+  hint('Фон: '+GRID_NAMES[mode]);drawBoard();
+}
+
+addEventListener('pointerdown',e=>{
+  if(menuEl.classList.contains('show')&&!menuEl.contains(e.target))closeMenu();
+},true);
+addEventListener('blur',closeMenu);
+addEventListener('wheel',()=>{if(menuEl.classList.contains('show'))closeMenu();},{passive:true});
 document.getElementById('selLock').onclick=()=>{
   if(!selection.length)return;
   const on=!selection.every(it=>it.locked);   // группа блокируется целиком
@@ -1984,8 +2239,9 @@ document.getElementById('png').onclick=()=>{
   const x=c.getContext('2d');
   x.fillStyle=PAPER;x.fillRect(0,0,c.width,c.height);
   x.setTransform(k,0,0,k,-(b.x0-pad)*k,-(b.y0-pad)*k);
-  for(const it of items)if(BACK_TYPES.has(it.type))paintItem(x,it);
-  for(const it of items)if(!BACK_TYPES.has(it.type))paintItem(x,it);
+  const back=it=>BACK_TYPES.has(it.type)&&!it.front;   // как и на экране
+  for(const it of items)if(back(it))paintItem(x,it);
+  for(const it of items)if(!back(it))paintItem(x,it);
   c.toBlob(bl=>{const a=document.createElement('a');
     a.href=URL.createObjectURL(bl);
     a.download=(document.getElementById('title').textContent||'doska')+'.png';
@@ -2000,13 +2256,21 @@ addEventListener('keydown',e=>{
   if((e.ctrlKey||e.metaKey)&&k==='z'){e.preventDefault();e.shiftKey?redo():undo();return;}
   if((e.ctrlKey||e.metaKey)&&k==='y'){e.preventDefault();redo();return;}
   if((e.ctrlKey||e.metaKey)&&k==='d'){e.preventDefault();duplicateSelected();return;}
-  if((e.ctrlKey||e.metaKey)&&k==='a'){
-    e.preventDefault();
-    setTool('select');
-    selectMany(items.filter(it=>SELECTABLE.has(it.type)&&mineOnly(it)));
-    return;
+  if((e.ctrlKey||e.metaKey)&&k==='a'){e.preventDefault();selectAll();return;}
+  if((e.ctrlKey||e.metaKey)&&k==='c'){e.preventDefault();copySelected(false);return;}
+  if((e.ctrlKey||e.metaKey)&&k==='x'){e.preventDefault();copySelected(true);return;}
+  // Ctrl+V перехватываем только для своего буфера: картинку из системного
+  // ловит обработчик paste, и мешать ему нельзя
+  if((e.ctrlKey||e.metaKey)&&k==='v'&&clipboard.length){
+    e.preventDefault();pasteClipboard(hoverPt?toWorld(hoverPt.x,hoverPt.y):null);return;
+  }
+  if((e.ctrlKey||e.metaKey)&&k==='g'){
+    e.preventDefault();e.shiftKey?ungroupSelected():groupSelected();return;
   }
   if(e.ctrlKey||e.metaKey)return;
+  if(k===']'&&selection.length){e.preventDefault();moveLayer('front');return;}
+  if(k==='['&&selection.length){e.preventDefault();moveLayer('back');return;}
+  if(k==='escape'&&menuEl.classList.contains('show')){closeMenu();return;}
   if(k==='1')setTool('pen'); if(k==='2')setTool('marker'); if(k==='3')setTool('eraser');
   if(k==='4')setTool('select'); if(k==='5')setTool('hand');
   if(k==='6')setTool('shape');
