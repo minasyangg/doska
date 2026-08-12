@@ -69,7 +69,27 @@
 
   .card{background:var(--panel);border:1px solid var(--edge);border-radius:11px;padding:6px;
         display:flex;gap:6px;align-items:center;box-shadow:0 10px 28px rgba(15,17,20,.24)}
-  .top{position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:10;display:flex;gap:8px;align-items:center;max-width:calc(100vw - 28px)}
+  .top{position:fixed;right:14px;top:14px;z-index:10;display:flex;gap:8px;align-items:center;max-width:calc(100vw - 28px)}
+  /* название не должно распирать панель: длинное подрезаем многоточием */
+  #title{max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px}
+  .sepv{width:1px;height:20px;background:var(--edge);margin:0 3px}
+  /* поле ввода надписи: без рамок и фона, чтобы буквы вставали ровно туда,
+     где потом окажется готовый текст */
+  #textEdit{position:fixed;z-index:14;margin:0;padding:0;border:0;outline:0;resize:none;
+        overflow:hidden;background:transparent;box-shadow:0 0 0 1px #2F80ED;border-radius:3px;
+        line-height:1.28;font-family:ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif}
+  .mini.ic b{position:absolute;right:1px;bottom:0;font-size:10px;font-weight:600;
+        color:var(--text);background:var(--panel-2);border-radius:6px;padding:0 3px;line-height:13px}
+  .mini.ic{position:relative}
+  /* раскрывающиеся списки панели */
+  .pop{position:fixed;right:14px;top:56px;z-index:20;flex-direction:column;align-items:stretch;
+        gap:7px;padding:10px;min-width:210px;max-width:280px}
+  .pop.show{display:flex}
+  .pop input{background:var(--panel-2);border:1px solid var(--edge);border-radius:7px;
+        color:var(--text);padding:6px 8px;font-size:12px;width:100%}
+  .pop .who{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text)}
+  .pop .who .av{margin-left:0}
+  .pop .role{color:var(--muted);font-size:11.5px;margin-left:auto}
   .mini{border:0;background:transparent;color:var(--muted);height:30px;min-width:30px;padding:0 9px;
         border-radius:8px;cursor:pointer;font-size:12.5px;display:grid;place-items:center;white-space:nowrap}
   .mini:hover{background:var(--panel-2);color:var(--text)}
@@ -234,6 +254,7 @@
   <button class="tool on" data-tool="pen" title="Карандаш (1) · правая кнопка — настройки"><svg viewBox="0 0 24 24"><path d="M4 20l4-1 10-10a2.5 2.5 0 0 0-3.5-3.5L4.5 15.5 4 20z"/><path d="M13.5 6.5l4 4"/></svg></button>
   <button class="tool" data-tool="marker" title="Маркер (2) · правая кнопка — настройки"><svg viewBox="0 0 24 24"><path d="M9 15l-3 3v2h4l3-3"/><path d="M12 17L7 12l8-8a2.8 2.8 0 0 1 4 4l-7 9z"/></svg></button>
   <button class="tool" data-tool="eraser" title="Ластик (3)"><svg viewBox="0 0 24 24"><path d="M8 20h12"/><path d="M15.5 4.5l4 4a2 2 0 0 1 0 2.8L12 19H8l-3.5-3.5a2 2 0 0 1 0-2.8l8.2-8.2a2 2 0 0 1 2.8 0z"/></svg></button>
+  <button class="tool" data-tool="text" title="Надпись (T) · щёлкните по доске и печатайте"><svg viewBox="0 0 24 24"><path d="M5 6h14M12 6v13M9 19h6"/></svg></button>
   <button class="tool" data-tool="select" title="Выделить (4) · тяните рамку по пустому месту"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.5L10.5 19 5 3z"/></svg></button>
   <button class="tool" data-tool="hand" title="Рука (5 / пробел)"><svg viewBox="0 0 24 24"><path d="M8 12V5.5a1.5 1.5 0 0 1 3 0V11m0-.5V4.5a1.5 1.5 0 0 1 3 0V11m0-.5v-1a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-2.7L4.6 15a1.6 1.6 0 0 1 2.6-1.8L8 14.5"/></svg></button>
   <button class="tool" id="shapesBtn" aria-expanded="false" title="Фигуры и линии (6) — нажмите, чтобы выбрать"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1.5"/></svg></button>
@@ -291,20 +312,49 @@
   </div>
 </div>
 
+<!-- Верхняя панель свёрнута в значки и уведена в правый угол: холст важнее
+     подписей, а что делает кнопка, видно по значку и подсказке. Название
+     доски осталось текстом — по нему её узнают и по нему же переименовывают. -->
 <div class="top hidden" id="topBar">
   <div class="card">
     <span class="dot" id="conn" title="Соединение"></span>
     <span id="title">—</span>
-    <div class="peers" id="peers"></div>
-    <button class="mini" id="copy">Ссылка ученику</button>
-    <button class="mini" id="lock" hidden>Запретить рисовать</button>
-    <button class="mini" id="gear" hidden title="Доступ к доске">Доступ</button>
-    <button class="mini follow" id="follow" hidden>Следовать</button>
+    <span class="sepv"></span>
+    <button class="mini ic" id="peersBtn" title="Участники">
+      <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M16 5.6a3.2 3.2 0 0 1 0 6.3"/><path d="M17.5 14.2A5.5 5.5 0 0 1 20.5 19"/></svg>
+      <b id="peersCount">0</b>
+    </button>
+    <button class="mini ic" id="copy" title="Ссылка ученику">
+      <svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="6" r="2.6"/><circle cx="18" cy="18" r="2.6"/><path d="M8.4 10.8l7.2-3.6M8.4 13.2l7.2 3.6"/></svg>
+    </button>
+    <button class="mini ic" id="gear" hidden title="Доступ к доске">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.2M12 18.8V21M21 12h-2.2M5.2 12H3M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6M18.4 18.4l-1.6-1.6M7.2 7.2L5.6 5.6"/></svg>
+    </button>
+    <button class="mini ic" id="lock" hidden title="Запретить рисовать">
+      <svg viewBox="0 0 24 24" id="lockIcon"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 7.7-1.5"/></svg>
+    </button>
+    <button class="mini ic follow" id="follow" hidden title="Следовать за преподавателем">
+      <svg viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.6"/></svg>
+    </button>
     <!-- у преподавателя обратное действие: не самому идти за кем-то, а
          подтянуть всех к тому месту, где он сейчас объясняет -->
-    <button class="mini" id="callAll" hidden title="Показать всем это место">Все ко мне</button>
+    <button class="mini ic" id="callAll" hidden title="Показать всем это место">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7.5"/><path d="M12 1.5v3M12 19.5v3M22.5 12h-3M4.5 12h-3"/></svg>
+    </button>
   </div>
   <div class="card ro" id="readonly" hidden>Только просмотр</div>
+</div>
+
+<!-- Поле ввода надписи. Живёт поверх холста ровно на месте будущего текста и
+     тем же кеглем: так человек сразу видит, как встанет строка. -->
+<textarea id="textEdit" class="hidden" spellcheck="false"></textarea>
+
+<!-- Раскрывающиеся списки панели: участники по именам и ссылка на доску. -->
+<div class="pop card hidden" id="peersPop"></div>
+<div class="pop card hidden" id="linkPop">
+  <div class="label" style="margin-bottom:6px">Ссылка ученику</div>
+  <input id="linkVal" readonly>
+  <button class="mini" id="linkCopy" style="background:var(--panel-2)">Скопировать</button>
 </div>
 
 <div class="zoombar card hidden" id="zoombar">
@@ -372,7 +422,7 @@ const PENS=['#1A1C20','#24468C','#B3322B','#2E6B47','#6B3FA0'];
 const MARKERS=['#F2D33C','#7ED9C4','#F79BB0','#9DC5F5','#C9E36B'];
 const FILLS=[null,'#F2D33C','#7ED9C4','#F79BB0','#9DC5F5','#C9E36B'];
 const STREAMLINE=0.42;
-const STYLED=new Set(['pen','marker','shape','path']);
+const STYLED=new Set(['pen','marker','shape','path','text']);
 
 const stage=document.getElementById('stage');
 const board=document.getElementById('board'), live=document.getElementById('live');
@@ -485,12 +535,12 @@ function paintStroke(ctx,s){
 
 /* ═══ типовые реестры: новый тип объекта подключается сюда, не хирургией по всему файлу ═══ */
 // box-семейство — геометрия x,y,w,h(+rot); embed зарезервирован под будущий график (не реализован)
-const BOX_TYPES=new Set(['image','shape','embed']);
+const BOX_TYPES=new Set(['image','shape','embed','text']);
 // back-слой — всегда рисуется под рукописным текстом, независимо от порядка добавления
 // (фигуры сюда не входят — они в общем z-порядке наравне со штрихами)
 const BACK_TYPES=new Set(['image','embed']);
 // кто сейчас реально выделяем инструментом "выделить"
-const SELECTABLE=new Set(['image','pen','marker','shape','path']);
+const SELECTABLE=new Set(['image','pen','marker','shape','path','text']);
 
 /* поворот вокруг локального центра (cx,cy) на угол a — общая мини-утилита */
 /** Угол в диапазон (−180°, 180°]: 350° читается как −10°, так понятнее. */
@@ -506,6 +556,8 @@ function rotAround(px,py,cx,cy,a){
 }
 
 function bboxOf(it){
+  // у надписи своя высота не хранится — считаем по числу строк
+  if(it.type==='text')it.h=textHeight(bctx,it);
   if(BOX_TYPES.has(it.type)){
     const rot=it.rot||0;
     if(!rot)return{x0:it.x,y0:it.y,x1:it.x+it.w,y1:it.y+it.h};
@@ -767,8 +819,57 @@ function paintItem(ctx,it){
   }
   if(it.type==='shape'){paintShape(ctx,it);return;}
   if(it.type==='path'){paintPath(ctx,it);return;}
+  if(it.type==='text'){paintText(ctx,it);return;}
   if(it.type==='pen'||it.type==='marker'){paintStroke(ctx,it);return;}
   // неизвестные/будущие типы (conn/embed) — молча пропускаем, не роняем рендер
+}
+
+/* ═══════════════════ надписи ═══════════════════
+   Ширина задаётся объектом, высота считается из числа строк: хранить её
+   отдельно значило бы держать два источника правды и ловить их расхождение
+   при смене кегля. */
+const TEXT_LH=1.28;                                   // межстрочный, доля кегля
+const textFont=it=>(it.italic?'italic ':'')+(it.bold?'600 ':'')+
+  it.size+'px ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif';
+
+/** Разбивка на строки по ширине объекта. Переносим по словам, а слово длиннее
+    строки рвём — иначе оно уехало бы за край. */
+function textLines(ctx,it){
+  ctx.font=textFont(it);
+  const out=[];
+  for(const para of String(it.text||'').split('\n')){
+    if(!para){out.push('');continue;}
+    let line='';
+    for(const word of para.split(/(\s+)/)){
+      if(!word)continue;
+      const probe=line+word;
+      if(line&&ctx.measureText(probe).width>it.w){
+        out.push(line.replace(/\s+$/,''));line=word.replace(/^\s+/,'');
+      }else line=probe;
+      while(ctx.measureText(line).width>it.w&&line.length>1){
+        let cut=line.length-1;
+        while(cut>1&&ctx.measureText(line.slice(0,cut)).width>it.w)cut--;
+        out.push(line.slice(0,cut));line=line.slice(cut);
+      }
+    }
+    out.push(line.replace(/\s+$/,''));
+  }
+  return out;
+}
+const textHeight=(ctx,it)=>Math.max(it.size*TEXT_LH,textLines(ctx,it).length*it.size*TEXT_LH);
+
+function paintText(ctx,it){
+  const rot=it.rot||0;
+  const lines=textLines(ctx,it);
+  const h=lines.length*it.size*TEXT_LH;
+  ctx.save();
+  if(rot){const cx=it.x+it.w/2,cy=it.y+h/2;ctx.translate(cx,cy);ctx.rotate(rot);ctx.translate(-cx,-cy);}
+  ctx.font=textFont(it);
+  ctx.fillStyle=it.color||'#1A1C20';
+  ctx.textBaseline='alphabetic';ctx.textAlign='left';
+  for(let i=0;i<lines.length;i++)
+    ctx.fillText(lines[i],it.x,it.y+it.size*TEXT_LH*(i+1)-it.size*0.28);
+  ctx.restore();
 }
 
 /** Контур фигуры ломаными в мировых координатах — для попадания курсора.
@@ -937,8 +1038,9 @@ function flushBoard(){
   // Исключение — та, которую человек сам поднял «на передний план»: прямая
   // просьба сильнее умолчания.
   const back=it=>BACK_TYPES.has(it.type)&&!it.front;
-  for(const it of items) if(back(it)&&hit(it)) paintItem(bctx,it);
-  for(const it of items) if(!back(it)&&hit(it)) paintItem(bctx,it);
+  // hidden — надпись, которую сейчас правят: её показывает поле ввода
+  for(const it of items) if(!it.hidden&&back(it)&&hit(it)) paintItem(bctx,it);
+  for(const it of items) if(!it.hidden&&!back(it)&&hit(it)) paintItem(bctx,it);
 }
 
 const remoteLive=new Map(), cursors=new Map(), peers=new Map();
@@ -1114,7 +1216,7 @@ const CURSOR={
           '<path d="M2.6 21.4l1.9-.5-1.4-1.4z" fill="#16181C"/>',2,22),
   marker:cur('<path d="M3 21l1.2-4.6 9.4-9.4 4.4 4.4-9.4 9.4L3 21z" fill="#FFFDF8" stroke="#16181C" stroke-width="1.25" stroke-linejoin="round"/>'+
           '<path d="M14.2 5.4l2.6-2.6 4.4 4.4-2.6 2.6z" fill="#F2D33C" stroke="#16181C" stroke-width="1.25"/>',3,21),
-  select:'default', hand:'grab', eraser:'none'
+  select:'default', hand:'grab', eraser:'none', text:'text'
 };
 /* Стрелка на ручке показывает, куда потянется край. Направление считается с
    учётом поворота объекта: у наклонённого прямоугольника «верхняя» ручка тянет
@@ -1295,6 +1397,10 @@ const DEFLATE={
   shape:it=>({id:it.id,type:'shape',kind:it.kind,x:+it.x.toFixed(1),y:+it.y.toFixed(1),w:+it.w.toFixed(1),h:+it.h.toFixed(1),
               rot:+((it.rot||0).toFixed(4)),color:it.color,size:+it.size.toFixed(3),dash:it.dash||0,
               fill:it.fill||null,g:it.g||null,locked:!!it.locked}),
+  text:it=>({id:it.id,type:'text',text:it.text,x:+it.x.toFixed(1),y:+it.y.toFixed(1),
+             w:+it.w.toFixed(1),rot:+((it.rot||0).toFixed(4)),color:it.color,
+             size:+(+it.size).toFixed(2),bold:!!it.bold,italic:!!it.italic,
+             g:it.g||null,locked:!!it.locked}),
   path:it=>({id:it.id,type:'path',kind:it.kind,closed:!!it.closed,
              pts:it.pts.map(p=>[+p.x.toFixed(2),+p.y.toFixed(2)]),
              color:it.color,size:+it.size.toFixed(3),dash:it.dash||0,fill:it.fill||null,
@@ -1308,6 +1414,8 @@ const deflate=it=>(DEFLATE[it.type]||deflateStroke)(it);
 const INFLATE={
   image:raw=>({...raw,rot:raw.rot||0,front:!!raw.front,g:raw.g||null,locked:!!raw.locked,bbox:null}),
   shape:raw=>({...raw,rot:raw.rot||0,dash:raw.dash||0,fill:raw.fill||null,g:raw.g||null,locked:!!raw.locked,bbox:null}),
+  text:raw=>({...raw,rot:raw.rot||0,w:raw.w||240,size:raw.size||24,
+              bold:!!raw.bold,italic:!!raw.italic,g:raw.g||null,locked:!!raw.locked,bbox:null}),
   path:raw=>({...raw,pts:raw.pts.map(a=>({x:a[0],y:a[1]})),closed:!!raw.closed,
               dash:raw.dash||0,fill:raw.fill||null,a1:raw.a1||0,a2:raw.a2||0,
               g:raw.g||null,locked:!!raw.locked,bbox:null})
@@ -1523,6 +1631,14 @@ stage.addEventListener('pointerdown',e=>{
     applyCursor();return;
   }
   if(e.button!==0&&e.pointerType==='mouse')return;
+
+  /* надпись: щелчок ставит её туда, куда указали */
+  if(S.tool==='text'){
+    const under=itemAt(w);
+    if(under&&under.type==='text'&&mineOnly(under))openTextEditor(null,under);
+    else openTextEditor(w,null);
+    return;
+  }
 
   /* выделение объектов */
   if(S.tool==='select'){
@@ -1772,6 +1888,8 @@ const GEOM_KEYS={
   image:['x','y','w','h','rot','locked'],
   shape:['x','y','w','h','rot','color','size','dash','fill','locked'],
   path:['pts','color','size','dash','fill','a1','a2','locked'],
+  // высоты у надписи нет: она считается из числа строк
+  text:['x','y','w','rot','text','color','size','bold','italic','locked'],
   pen:['pts','locked'],marker:['pts','locked']
 };
 function geomKeys(it){return GEOM_KEYS[it.type]||[];}
@@ -1882,6 +2000,12 @@ stage.addEventListener('pointerleave',()=>{hoverPt=null;drawLive();});
 stage.addEventListener('contextmenu',e=>e.preventDefault());
 stage.addEventListener('dblclick',e=>{
   if(pathDraft&&pathDraft.mode==='vertex'){e.preventDefault();commitPathDraft();}
+  // двойной щелчок по надписи открывает её на правку — привычнее, чем
+  // возвращаться к инструменту «надпись»
+  if(S.tool==='select'){
+    const p=localXY(e), it=itemAt(toWorld(p.x,p.y));
+    if(it&&it.type==='text'&&mineOnly(it)&&!it.locked){e.preventDefault();openTextEditor(null,it);}
+  }
 });
 
 /* Прореживание законченного штриха — Рамер, Дуглас и Пекер.
@@ -1951,6 +2075,73 @@ function abortDraft(){
 }
 /* коммит новой линии/полилинии/кривой/полигона — общий выход и для
    drag-режима (line/arrow), и для расстановки вершин кликами */
+/* ═══════════════════ ввод надписи ═══════════════════
+   Печатаем в настоящем textarea поверх холста: своя каретка, выделение,
+   раскладки и подсказки клавиатуры на планшете достаются даром, а рисовать их
+   в canvas пришлось бы руками. */
+const textEdit=document.getElementById('textEdit');
+let editing=null;                    // {item, isNew, w}
+
+function openTextEditor(at,item){
+  if(!canEdit())return hint('Преподаватель закрыл доску для правок');
+  closeTextEditor(true);
+  const size=item?item.size:Math.max(12,S.size*4);
+  const w=item?item.w:280;
+  editing={item:item||null,isNew:!item,x:item?item.x:at.x,y:item?item.y:at.y,size,w};
+  const p=toScreen(editing.x,editing.y);
+  textEdit.value=item?item.text:'';
+  textEdit.style.left=p.x+'px';
+  textEdit.style.top=p.y+'px';
+  textEdit.style.width=(w*S.cam.z)+'px';
+  textEdit.style.fontSize=(size*S.cam.z)+'px';
+  textEdit.style.color=item?item.color:S.color;
+  textEdit.style.fontWeight=item&&item.bold?'600':'400';
+  textEdit.style.fontStyle=item&&item.italic?'italic':'normal';
+  textEdit.classList.remove('hidden');
+  if(item){item.hidden=true;drawBoard();}      // редактируемое не двоится
+  autoGrowText();
+  setTimeout(()=>{textEdit.focus();textEdit.select();},0);
+}
+function autoGrowText(){
+  textEdit.style.height='auto';
+  textEdit.style.height=Math.max(textEdit.scrollHeight,parseFloat(textEdit.style.fontSize)*1.28)+'px';
+}
+textEdit.addEventListener('input',autoGrowText);
+textEdit.addEventListener('keydown',e=>{
+  e.stopPropagation();                          // горячие клавиши доски не мешают печатать
+  if(e.key==='Escape'){e.preventDefault();closeTextEditor(false);}
+  if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();closeTextEditor(true);}
+});
+textEdit.addEventListener('blur',()=>closeTextEditor(true));
+
+function closeTextEditor(save){
+  if(!editing)return;
+  const ed=editing;editing=null;
+  const body=textEdit.value;
+  textEdit.classList.add('hidden');textEdit.value='';
+  if(ed.item)delete ed.item.hidden;
+
+  if(!save||!body.trim()){
+    // пустую надпись не заводим, а у существующей отмена возвращает прежний вид
+    drawBoard();return;
+  }
+  if(ed.item){
+    if(ed.item.text===body){drawBoard();return;}
+    const before=snapGeom(ed.item,ed.item);
+    ed.item.text=body;ed.item.bbox=null;
+    pushUndo([{type:'move',id:ed.item.id,before,after:snapGeom(ed.item,ed.item)}]);
+    net.send({t:'move',id:ed.item.id,text:body});
+    drawBoard();return;
+  }
+  const it={id:newId(),by:S.me&&S.me.id,type:'text',text:body,
+            x:ed.x,y:ed.y,w:ed.w,rot:0,color:S.color,size:ed.size,
+            bold:false,italic:false,g:null,locked:false,bbox:null};
+  addItem(it);
+  pushUndo([{type:'add',item:it}]);
+  net.send({t:'add',item:deflate(it)});
+  setTool('select');select(it);
+}
+
 function commitPath(kind,pts){
   const it={id:newId(),by:S.me&&S.me.id,type:'path',kind,
             pts:pts.map(p=>({x:p.x,y:p.y})),closed:kind==='polygon',
@@ -2123,7 +2314,7 @@ function redo(){
 /* ═══════════════════ интерфейс доски ═══════════════════ */
 const inksEl=document.getElementById('inks'),sizeEl=document.getElementById('size');
 const sizeVal=document.getElementById('sizeVal'),prev=document.getElementById('preview');
-const pctx=prev.getContext('2d'),peersEl=document.getElementById('peers');
+const pctx=prev.getContext('2d');
 const palette=()=>S.tool==='marker'?MARKERS:PENS;
 
 /* если что-то выделено — правит стиль у выделенного объекта (генерируя
@@ -2265,7 +2456,7 @@ document.addEventListener('pointerdown',e=>{
 /* ── панель настроек инструмента ───────────────────────────
    По умолчанию скрыта: холст важнее. Открывается правой кнопкой по значку
    инструмента и повторным нажатием по уже выбранному. */
-const PEN_TITLE={pen:'Перо',marker:'Маркер',shape:'Фигура',path:'Линия'};
+const PEN_TITLE={pen:'Перо',marker:'Маркер',shape:'Фигура',path:'Линия',text:'Надпись'};
 function updatePenPanel(){
   const on=S.panelOpen&&STYLED.has(S.tool)&&!!S.boardId;
   document.getElementById('penPanel').classList.toggle('hidden',!on);
@@ -2377,16 +2568,27 @@ function drawPreview(){
   pctx.save();if(s.type==='marker')pctx.globalAlpha=0.42;
   pctx.fillStyle=s.color;outlinePath(pctx,s);pctx.fill();pctx.restore();
 }
+/* Участники свёрнуты в один значок со счётчиком; имена — по нажатию.
+   На панели их аватарки занимали место тем больше, чем больше людей. */
+const CAP_NAME={owner:'преподаватель',view:'только смотрит',edit:'рисует'};
 function renderPeers(){
-  peersEl.innerHTML='';
-  for(const [,p] of peers){
-    const d=document.createElement('div');
-    d.className='av';d.style.background=p.color;
-    d.textContent=(p.name.trim()[0]||'?').toUpperCase();
-    d.title=p.name+(p.cap==='owner'?' — преподаватель':p.cap==='view'?' — только смотрит':'');
-    peersEl.appendChild(d);
-  }
+  // сам смотрящий уже лежит в peers — его кладут туда при init
+  const cnt=document.getElementById('peersCount');
+  if(cnt)cnt.textContent=String(peers.size);
+  const pop=document.getElementById('peersPop');
+  if(!pop||pop.classList.contains('hidden'))return;
+  fillPeersPop();
 }
+function fillPeersPop(){
+  const pop=document.getElementById('peersPop');
+  const rows=[...peers.values()];
+  pop.innerHTML='<div class="label" style="margin-bottom:2px">Участники · '+rows.length+'</div>'+
+    rows.map(p=>'<div class="who"><div class="av" style="background:'+
+      (p.color||'#7A7368')+'">'+((p.name||'?').trim()[0]||'?').toUpperCase()+'</div>'+
+      '<span>'+escapeHtml(p.name||'Гость')+'</span>'+
+      '<span class="role">'+(CAP_NAME[p.cap]||'')+'</span></div>').join('');
+}
+const escapeHtml=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function setTitle(t){
   const el=document.getElementById('title');
   el.textContent=t||'Без названия';
@@ -2403,7 +2605,10 @@ function applyRole(){
   document.getElementById('wipe').disabled=!owner;
   const lk=document.getElementById('lock');
   lk.classList.toggle('on',S.locked);
-  lk.textContent=S.locked?'Рисование запрещено':'Запретить рисовать';
+  // подписи у кнопки больше нет — состояние показывает сам замок
+  lk.title=S.locked?'Рисование запрещено — нажмите, чтобы разрешить':'Запретить рисовать';
+  const li=document.getElementById('lockIcon');
+  if(li)li.innerHTML=S.locked?LOCK_SHUT:LOCK_OPEN;
   // наблюдателю инструменты правки ни к чему — пусть не выглядят рабочими
   const ro=S.cap==='view';
   document.getElementById('readonly').hidden=!ro;
@@ -2470,7 +2675,30 @@ async function copyLink(id,label){
   try{await navigator.clipboard.writeText(link);hint(label+' скопирована');}
   catch{prompt(label+':',link);}
 }
-document.getElementById('copy').onclick=()=>copyLink(S.boardId,'Ссылка на доску');
+
+/* Списки панели: открыт может быть только один, щелчок мимо закрывает оба. */
+const peersPop=document.getElementById('peersPop'), linkPop=document.getElementById('linkPop');
+function popOpen(el){
+  for(const p of [peersPop,linkPop])p.classList.toggle('hidden',p!==el||!el);
+  if(el===peersPop)fillPeersPop();
+  if(el===linkPop){
+    document.getElementById('linkVal').value=location.origin+'/board/'+S.boardId;
+  }
+}
+document.getElementById('peersBtn').onclick=()=>
+  popOpen(peersPop.classList.contains('hidden')?peersPop:null);
+document.getElementById('copy').onclick=()=>
+  popOpen(linkPop.classList.contains('hidden')?linkPop:null);
+document.getElementById('linkCopy').onclick=()=>{
+  copyLink(S.boardId,'Ссылка на доску');
+  const inp=document.getElementById('linkVal');inp.select();
+};
+addEventListener('pointerdown',e=>{
+  if(peersPop.classList.contains('hidden')&&linkPop.classList.contains('hidden'))return;
+  if(peersPop.contains(e.target)||linkPop.contains(e.target))return;
+  if(e.target.closest&&e.target.closest('#peersBtn,#copy'))return;
+  popOpen(null);
+},true);
 document.getElementById('gear').onclick=()=>openSettings(S.boardId);
 document.getElementById('title').onclick=async()=>{
   if(S.cap!=='owner')return;
@@ -2834,6 +3062,7 @@ addEventListener('keydown',e=>{
   if(k==='escape'&&menuEl.classList.contains('show')){closeMenu();return;}
   if(k==='1')setTool('pen'); if(k==='2')setTool('marker'); if(k==='3')setTool('eraser');
   if(k==='4')setTool('select'); if(k==='5')setTool('hand');
+  if(k==='t')setTool('text');
   if(k==='6')setTool('shape');
   if(k==='r'){S.shapeKind='rect';setTool('shape');}
   if(k==='o'){S.shapeKind='ellipse';setTool('shape');}

@@ -705,6 +705,24 @@ function cleanImage(im, by) {
            locked: !!im.locked };
 }
 
+/* Надпись на доске. w — ширина, по которой переносятся строки; высота
+   считается при отрисовке, хранить её незачем. size — кегль в единицах доски. */
+function cleanText(t, by) {
+  const body = String(t.text == null ? '' : t.text).slice(0, 4000);
+  if (!body.trim()) return null;
+  const num = (v, d) => Number.isFinite(+v) ? +v : d;
+  return { id: String(t.id).slice(0, 48), by, type: 'text',
+           text: body,
+           x: num(t.x, 0), y: num(t.y, 0),
+           w: Math.max(24, Math.min(20000, num(t.w, 240))),
+           rot: num(t.rot, 0),
+           color: String(t.color || '#1A1C20').slice(0, 24),
+           size: Math.min(400, Math.max(6, num(t.size, 24))),
+           bold: !!t.bold, italic: !!t.italic,
+           g: clampGroup(t.g),
+           locked: !!t.locked };
+}
+
 /* общие поля стиля для фигур/линий (цвет, толщина, дэш, заливка) */
 function cleanStyle(o) {
   return {
@@ -754,7 +772,7 @@ function cleanPath(p, by) {
 /* реестр валидаторов по типу — новый тип регистрируется здесь один раз,
    вместо тернарника в add/restore. Незарегистрированный тип (штрихи,
    а также будущие типы до появления своего cleaner'а) идёт через cleanStroke. */
-const CLEANERS = { image: cleanImage, shape: cleanShape, path: cleanPath };
+const CLEANERS = { image: cleanImage, shape: cleanShape, path: cleanPath, text: cleanText };
 const pick = type => CLEANERS[type] || cleanStroke;
 
 /* PATCHABLE[type] — какие поля можно менять через 'move'; PATCH_CLAMP[type][key] —
@@ -804,6 +822,19 @@ const PATCH_CLAMP = {
     size: (v, it) => Number.isFinite(+v) ? Math.min(600, Math.max(0.1, +v)) : it.size,
     dash: (v, it) => [0, 1, 2].includes(+v) ? +v : it.dash,
     fill: (v, it) => v === null ? null : (typeof v === 'string' ? v.slice(0, 24) : it.fill),
+    locked: (v) => !!v
+  },
+  text: {
+    g: clampG,
+    text: (v, it) => typeof v === 'string' && v.slice(0, 4000).trim() ? v.slice(0, 4000) : it.text,
+    x: (v, it) => Number.isFinite(+v) ? +v : it.x,
+    y: (v, it) => Number.isFinite(+v) ? +v : it.y,
+    w: (v, it) => Math.max(24, Math.min(20000, Number.isFinite(+v) ? +v : it.w)),
+    rot: (v, it) => Number.isFinite(+v) ? +v : it.rot,
+    color: (v, it) => typeof v === 'string' ? v.slice(0, 24) : it.color,
+    size: (v, it) => Number.isFinite(+v) ? Math.min(400, Math.max(6, +v)) : it.size,
+    bold: (v) => !!v,
+    italic: (v) => !!v,
     locked: (v) => !!v
   },
   path: {
