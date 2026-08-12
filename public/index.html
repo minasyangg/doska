@@ -1439,10 +1439,61 @@ stage.addEventListener('dblclick',e=>{
   if(pathDraft&&pathDraft.mode==='vertex'){e.preventDefault();commitPathDraft();}
 });
 
+/* Прореживание законченного штриха — Рамер, Дуглас и Пекер.
+
+   Перо шлёт точки густо: pushPoint отбрасывает те, что ближе 0.35 px к
+   предыдущей, и всё равно на букву высотой 20 px приходится больше сотни.
+   Пятая часть из них лежит на прямой между соседями и не несёт ничего.
+
+   Прореживаем на месте, при отрыве пера: и в памяти вкладки, и в сообщении
+   серверу становится впятеро меньше. То же самое делает сервер перед снимком
+   (lib/store.js) — здесь это повторено потому, что клиент живёт одним файлом
+   без сборки и разделить код не с чем.
+
+   Допуск считается в экранных пикселях, а не в мировых: иначе штрих, начатый
+   с приближением, заметно осел бы сразу после отрыва пера. */
+function simplifyStroke(pts,eps,pEps){
+  const n=pts.length; if(n<3)return pts;
+  const keep=new Uint8Array(n); keep[0]=keep[n-1]=1;
+  const stack=[[0,n-1]];
+  while(stack.length){
+    const [a,b]=stack.pop(); if(b-a<2)continue;
+    const ax=pts[a].x,ay=pts[a].y,dx=pts[b].x-ax,dy=pts[b].y-ay;
+    const len=Math.hypot(dx,dy)||1;
+    let far=-1,best=eps;
+    for(let i=a+1;i<b;i++){
+      const d=Math.abs((pts[i].x-ax)*dy-(pts[i].y-ay)*dx)/len;
+      if(d>best){best=d;far=i;}
+    }
+    if(far>0){keep[far]=1;stack.push([a,far],[far,b]);}
+  }
+  // нажим задаёт толщину: где он заметно гулял, точку возвращаем
+  const gaps=[];
+  for(let i=1,prev=0;i<n;i++){ if(!keep[i])continue; if(i-prev>1)gaps.push([prev,i]); prev=i; }
+  while(gaps.length){
+    const [a,b]=gaps.pop();
+    const p0=pts[a].p==null?0.5:pts[a].p, p1=pts[b].p==null?0.5:pts[b].p;
+    let far=-1,best=pEps;
+    for(let j=a+1;j<b;j++){
+      const pj=pts[j].p==null?0.5:pts[j].p;
+      const d=Math.abs(pj-(p0+(p1-p0)*((j-a)/(b-a))));
+      if(d>best){best=d;far=j;}
+    }
+    if(far>0){keep[far]=1;
+      if(far-a>1)gaps.push([a,far]);
+      if(b-far>1)gaps.push([far,b]);}
+  }
+  const out=[];
+  for(let i=0;i<n;i++)if(keep[i])out.push(pts[i]);
+  return out;
+}
+
 function commit(){
   const s=current;current=null;drawId=null;drawLive();
   if(!s||!s.pts.length)return;
-  net.stream(s);
+  net.stream(s);                       // досылаем хвост живого штриха соседям
+  s.pts=simplifyStroke(s.pts,0.35/S.cam.z,0.06);
+  s.bbox=null;
   addItem(s);
   undoStack.push({type:'add',item:s});redoStack.length=0;
   net.send({t:'add',item:deflate(s)});net.sid=null;net.sent=0;
