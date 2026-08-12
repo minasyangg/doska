@@ -63,14 +63,11 @@ function readBody(req, limit) {
 }
 
 /* ═══════════════ комнаты в памяти ═══════════════ */
-/* На диске лежит только содержимое: объекты холста. Владелец, заголовок,
-   замок и правила доступа живут в БД mcko-app (041_doska_boards.sql) и
-   приезжают сюда через applyMeta() — файл их лишь кэширует, чтобы комната
-   могла подняться, пока БД отвечает. */
-/* Содержимое доски пишется журналом операций со снимками — см. lib/store.js.
-   Раньше на каждое изменение раз в четыре секунды переписывался весь файл
-   целиком: стоимость росла вместе с занятием, а окно потери держалось на
-   четырёх секундах. */
+/* На диске лежит только содержимое: объекты холста, журналом операций со
+   снимками — см. lib/store.js. Владелец, заголовок, замок и правила доступа
+   живут в БД mcko-app (041_doska_boards.sql) и приезжают сюда через
+   applyMeta() — файл их лишь кэширует, чтобы комната могла подняться, пока БД
+   отвечает. */
 const rooms = new Map();
 
 async function loadRoom(id) {
@@ -523,10 +520,33 @@ async function handleUpload(req, res, url) {
 
   const dir = path.join(DIR.files, id);
   await fsp.mkdir(dir, { recursive: true });
-  const name = Date.now().toString(36) + rnd(6) + ext;
-  await fsp.writeFile(path.join(dir, name), buf);
-  dirSizes.delete(id);
-  return reply(res, 200, { url: '/files/' + id + '/' + name });
+
+  // Имя файла — отпечаток содержимого. Один и тот же скриншот, вставленный
+  // дважды (а так и бывает: разобрали задачу, вернулись к ней через десять
+  // минут), ложится одним файлом. На боевом сервере из четырёх картинок две
+  // оказались копиями.
+  const name = crypto.createHash('sha256').update(buf).digest('base64url').slice(0, 22) + ext;
+  const file = path.join(dir, name);
+  const href = '/files/' + id + '/' + name;
+
+  const had = await fsp.stat(file).then(() => true).catch(() => false);
+  if (!had) {
+    // временный файл и переименование: иначе второй участник может успеть
+    // прочитать наполовину записанную картинку
+    const tmp = file + '.' + rnd(6) + '.tmp';
+    try {
+      await fsp.writeFile(tmp, buf);
+      await fsp.rename(tmp, file);
+    } catch (e) {
+      await fsp.unlink(tmp).catch(() => {});
+      throw e;
+    }
+    dirSizes.delete(id);
+    // В журнал: сама картинка на доске появится отдельной операцией add, но
+    // без этой строки журнал не знал бы, откуда взялся файл.
+    record(room, { t: 'img', url: href, bytes: buf.length });
+  }
+  return reply(res, 200, { url: href, dedup: had });
 }
 
 async function handleFile(req, res, p) {

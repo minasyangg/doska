@@ -1503,13 +1503,40 @@ stage.addEventListener('wheel',e=>{
 
 /* ═══════════════════ вставка картинок ═══════════════════ */
 const UPLOADABLE=new Set(['image/png','image/jpeg','image/webp','image/gif']);
+/* Скриншот из буфера обмена приходит в PNG — формат без потерь, и для снимка
+   экрана это впустую: на настоящих файлах WebP при q0.85 даёт вдвое-впятеро
+   меньше при расхождении меньше полутора уровней яркости из 255, чего не
+   видно. Перекодируем в браузере: сервер остаётся без графических библиотек,
+   а по сети уходит уже сжатое.
 
-async function toUploadable(blob){
-  if(UPLOADABLE.has(blob.type))return blob;
-  const bmp=await createImageBitmap(blob);
-  const c=document.createElement('canvas');c.width=bmp.width;c.height=bmp.height;
-  c.getContext('2d').drawImage(bmp,0,0);
-  return await new Promise(r=>c.toBlob(r,'image/png'));
+   Снимок с экрана 4K шириной 3840 точек на доске показывается примерно в
+   1300 — хранить его целиком незачем. Ужимаем длинную сторону до 2560, чтобы
+   оставался запас на приближение вдвое.
+
+   Если перекодирование не выиграло (а на мелких картинках PNG иногда лучше),
+   отправляем исходник: лучше сохранить как есть, чем ухудшить без выгоды. */
+const IMG_MAX_SIDE=2560, IMG_QUALITY=0.85;
+
+async function prepareImage(blob){
+  let bmp;
+  try{ bmp=await createImageBitmap(blob); }
+  catch{ return blob; }                       // не распознали — пусть решает сервер
+  const k=Math.min(1,IMG_MAX_SIDE/Math.max(bmp.width,bmp.height));
+  const w=Math.max(1,Math.round(bmp.width*k)), h=Math.max(1,Math.round(bmp.height*k));
+
+  const c=document.createElement('canvas');c.width=w;c.height=h;
+  const cx=c.getContext('2d');
+  cx.imageSmoothingEnabled=true;cx.imageSmoothingQuality='high';
+  cx.drawImage(bmp,0,0,w,h);
+
+  let out=await new Promise(r=>c.toBlob(r,'image/webp',IMG_QUALITY));
+  // Safari до 14 не умеет кодировать WebP и отдаёт PNG — там хотя бы уменьшим
+  if(!out||!/webp/.test(out.type))
+    out=await new Promise(r=>c.toBlob(r,'image/png'));
+  if(!out) return UPLOADABLE.has(blob.type)?blob:null;
+
+  if(k===1&&out.size>=blob.size&&UPLOADABLE.has(blob.type))return blob;
+  return out;
 }
 
 async function placeImage(blob,screenPt){
@@ -1517,7 +1544,8 @@ async function placeImage(blob,screenPt){
   if(!S.boardId)return;
   try{
     hint('Загружаю картинку…');
-    const file=await toUploadable(blob);
+    const file=await prepareImage(blob);
+    if(!file)throw new Error('не удалось прочитать картинку');
     const bmp=await createImageBitmap(file);
     const r=await fetch('/api/upload?board='+encodeURIComponent(S.boardId),
       {method:'POST',credentials:'same-origin',headers:{'content-type':file.type},body:file});
