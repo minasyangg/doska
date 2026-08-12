@@ -886,6 +886,10 @@ const net={
       case 'cap':S.cap=m.cap;applyRole();select(null);
         hint(m.cap==='view'?'Теперь вы только смотрите':'Права на доске изменились');break;
       case 'policy':S.anyEdit=!!m.anyEdit;break;
+      // доска упёрлась в потолок объектов. Раньше сервер молча выбрасывал
+      // самое старое, и начало занятия исчезало незаметно
+      case 'full':hint('Доска заполнена: '+(m.max||0).toLocaleString('ru')+
+        ' объектов. Заведите новую или сотрите лишнее');break;
       case 'denied':deniedScreen();break;
       case 'cursor':cursors.set(m.id,{x:m.x,y:m.y,t:performance.now()});drawLive();break;
       case 'view':{

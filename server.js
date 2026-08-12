@@ -19,6 +19,7 @@ const gotrue  = require('./lib/gotrue');
 const db      = require('./lib/db');
 const session = require('./lib/session');
 const store   = require('./lib/store');        // журнал операций и снимки досок
+const pt      = require('./lib/points');       // точки в памяти лежат плотно
 const cap_    = require('./lib/capability');   // с подчёркиванием: cap занято под уровень доступа
 
 const PORT     = process.env.PORT || 8080;
@@ -36,7 +37,9 @@ for (const d of Object.values(DIR)) fs.mkdirSync(d, { recursive: true });
 session.init(DIR.sessions);
 store.init(DIR);
 
-const MAX_ITEMS   = 80000;
+/* Потолок объектов на доску. Из окружения — чтобы проверять поведение на
+   переполнении, не рисуя восемьдесят тысяч штрихов. */
+const MAX_ITEMS   = Math.max(10, +process.env.MAX_ITEMS || 80000);
 const MAX_UPLOAD  = 16 * 1024 * 1024;      // 16 МБ на картинку
 const SAVE_EVERY  = 4000;
 const IDLE_UNLOAD = 30 * 60 * 1000;
@@ -667,10 +670,18 @@ const peerInfo = c => ({ id: c.me.sid, name: c.me.name, cap: c.me.cap, color: c.
 
 function cleanStroke(s, by) {
   if (!Array.isArray(s.pts) || !s.pts.length) return null;
+  const src = s.pts.slice(0, 12000);
+  const pts = new Float32Array(src.length * 3);
+  for (let i = 0; i < src.length; i++) {
+    const a = src[i] || [], o = i * 3;
+    pts[o] = +a[0] || 0;
+    pts[o + 1] = +a[1] || 0;
+    pts[o + 2] = Math.max(0, Math.min(1, +a[2] || 0.5));
+  }
   return { id: String(s.id).slice(0, 48), by, type: s.type === 'marker' ? 'marker' : 'pen',
            color: String(s.color || '#1A1C20').slice(0, 24),
            size: Math.min(600, Math.max(0.2, +s.size || 2)),
-           pts: s.pts.slice(0, 12000).map(a => [+a[0] || 0, +a[1] || 0, Math.max(0, Math.min(1, +a[2] || 0.5))]),
+           pts,
            locked: !!s.locked };
 }
 function cleanImage(im, by) {
@@ -709,10 +720,10 @@ function cleanPath(p, by) {
   if (!['line', 'polyline', 'curve', 'polygon'].includes(p.kind)) return null;
   if (!Array.isArray(p.pts)) return null;
   const minPts = p.kind === 'polygon' ? 3 : 2;
-  const pts = p.pts.slice(0, 2000).map(a => [+a[0] || 0, +a[1] || 0]);
-  if (pts.length < minPts) return null;
+  const src = p.pts.slice(0, 2000);
+  if (src.length < minPts) return null;
   return { id: String(p.id).slice(0, 48), by, type: 'path', kind: p.kind,
-           pts, closed: p.kind === 'polygon',
+           pts: pt.pack(src, 2), closed: p.kind === 'polygon',
            a1: clampArrow(p.a1), a2: clampArrow(p.a2),
            locked: !!p.locked,
            ...cleanStyle(p) };
@@ -728,7 +739,15 @@ const pick = type => CLEANERS[type] || cleanStroke;
    как провалидировать/зажать присланное значение (get текущее it для отката). */
 const clampPts = (v, it) => {
   if (!Array.isArray(v) || !v.length) return it.pts;
-  return v.slice(0, 12000).map(a => [+a[0] || 0, +a[1] || 0, Math.max(0, Math.min(1, +a[2] || 0.5))]);
+  const src = v.slice(0, 12000);
+  const out = new Float32Array(src.length * 3);
+  for (let i = 0; i < src.length; i++) {
+    const a = src[i] || [], o = i * 3;
+    out[o] = +a[0] || 0;
+    out[o + 1] = +a[1] || 0;
+    out[o + 2] = Math.max(0, Math.min(1, +a[2] || 0.5));
+  }
+  return out;
 };
 const PATCH_CLAMP = {
   image: {
@@ -761,8 +780,8 @@ const PATCH_CLAMP = {
     pts: (v, it) => {
       if (!Array.isArray(v)) return it.pts;
       const minPts = it.kind === 'polygon' ? 3 : 2;
-      const pts = v.slice(0, 2000).map(a => [+a[0] || 0, +a[1] || 0]);
-      return pts.length >= minPts ? pts : it.pts;
+      const src = v.slice(0, 2000);
+      return src.length >= minPts ? pt.pack(src, 2) : it.pts;
     },
     color: (v, it) => typeof v === 'string' ? v.slice(0, 24) : it.color,
     size: (v, it) => Number.isFinite(+v) ? Math.min(600, Math.max(0.1, +v)) : it.size,
@@ -811,7 +830,8 @@ wss.on('connection', (ws, req) => {
       // объекты его собственные, а остальным участникам знать его незачем
       send(ws, { t: 'init', you: { ...peerInfo(ws), uid: ws.me.uid },
                  title: room.title, locked: room.locked, anyEdit: room.anyEdit,
-                 peers: [...room.clients].filter(c => c !== ws).map(peerInfo), items: room.items });
+                 peers: [...room.clients].filter(c => c !== ws).map(peerInfo),
+                 items: room.items.map(i => pt.wire(i)) });
       broadcast(room, { t: 'peer', peer: peerInfo(ws) }, ws);
       console.log('[' + room.id + '] + ' + ws.me.name + ' (' + cap + ') → ' + room.clients.size);
       return;
@@ -836,13 +856,19 @@ wss.on('connection', (ws, req) => {
         const src = m.item || {};
         const it = pick(src.type)(src, ws.me.uid);
         if (!it || room.items.some(x => x.id === it.id)) return;
-        room.items.push(it);
-        if (room.items.length > MAX_ITEMS) {
-          const dropped = room.items.splice(0, 2000);
-          record(room, { t: 'erase', ids: dropped.map(x => x.id) });
+
+        // Потолок объектов. Раньше при переполнении молча выбрасывались две
+        // тысячи самых старых — то есть начало занятия исчезало, и человек
+        // узнавал об этом, только пролистав наверх. Теперь доска не принимает
+        // новое и говорит об этом: потерять написанное хуже, чем упереться.
+        if (room.items.length >= MAX_ITEMS) {
+          send(ws, { t: 'full', max: MAX_ITEMS });
+          return;
         }
-        record(room, { t: 'add', item: it });
-        broadcast(room, { t: 'add', item: it }, ws);
+        room.items.push(it);
+        const sent = pt.wire(it);
+        record(room, { t: 'add', item: sent });
+        broadcast(room, { t: 'add', item: sent }, ws);
         return;
       }
 
@@ -864,8 +890,10 @@ wss.on('connection', (ws, req) => {
         }
         if (!Object.keys(applied).length) return;
         Object.assign(it, applied);
-        record(room, { t: 'move', id: it.id, ...applied });
-        broadcast(room, { t: 'move', id: it.id, ...applied }, ws);
+        // заплатка тоже может нести точки — разворачиваем по шагу самого объекта
+        const patch = pt.wire(applied, pt.strideOf(it));
+        record(room, { t: 'move', id: it.id, ...patch });
+        broadcast(room, { t: 'move', id: it.id, ...patch }, ws);
         return;
       }
 
@@ -887,12 +915,14 @@ wss.on('connection', (ws, req) => {
         if (!mayEdit || !Array.isArray(m.items)) return;
         const back = [];
         for (const src of m.items.slice(0, 800)) {
+          if (room.items.length >= MAX_ITEMS) { send(ws, { t: 'full', max: MAX_ITEMS }); break; }
           const it = pick(src.type)(src, ws.me.uid);
           if (it && !room.items.some(x => x.id === it.id)) { room.items.push(it); back.push(it); }
         }
         if (!back.length) return;
-        record(room, { t: 'bulk', items: back });
-        broadcast(room, { t: 'bulk', items: back }, ws);
+        const sentBack = back.map(i => pt.wire(i));
+        record(room, { t: 'bulk', items: sentBack });
+        broadcast(room, { t: 'bulk', items: sentBack }, ws);
         return;
       }
 
