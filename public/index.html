@@ -89,7 +89,10 @@
   .menu.show{display:flex}
   .menu button{border:0;background:transparent;color:var(--text);text-align:left;
         padding:7px 10px;border-radius:7px;cursor:pointer;font-size:13px;white-space:nowrap;
-        display:flex;justify-content:space-between;gap:18px;align-items:center;width:100%}
+        display:flex;gap:10px;align-items:center;width:100%}
+  .menu button .lbl{flex:1}
+  .menu button svg{width:17px;height:17px;flex:none;fill:none;stroke:currentColor;
+        stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;opacity:.85}
   .menu button:hover:not(:disabled){background:var(--panel-2)}
   .menu button:disabled{color:var(--muted);opacity:.45;cursor:default}
   .menu button kbd{font:inherit;font-size:11.5px;color:var(--muted);letter-spacing:.02em}
@@ -270,6 +273,11 @@
        скорости. Здесь настраивается, насколько сильно. -->
   <div id="sensRow" class="hidden">
     <div class="label" style="margin-bottom:5px">Чувствительность мыши
+      <span id="followVal" style="color:var(--text)">58</span>%</div>
+    <input type="range" id="follow" min="12" max="100" step="2" value="58">
+    <div class="label" style="margin-top:5px;font-size:11.5px" id="followHint">
+      Выше — линия идёт точно за мышью. Ниже — мягче, дрожание сглаживается.</div>
+    <div class="label" style="margin:9px 0 5px">Толщина от скорости
       <span id="sensVal" style="color:var(--text)">100</span>%</div>
     <input type="range" id="sens" min="0" max="100" step="5" value="100">
     <div class="label" style="margin-top:5px;font-size:11.5px" id="sensHint">
@@ -363,6 +371,9 @@ const S={tool:'pen',size:4,color:PENS[0],penColor:PENS[0],markerColor:MARKERS[0]
   cam:{x:0,y:0,z:1},grid:store.get('doska.grid')||'grid',
   // насколько скорость руки меняет толщину линии: 1 — как было всегда, 0 — ровная
   sens:(()=>{const v=parseFloat(store.get('doska.sens'));return Number.isFinite(v)?Math.min(1,Math.max(0,v)):1;})(),
+  // насколько точно линия идёт за указателем: 1 — след в след, ниже — мягче
+  follow:(()=>{const v=parseFloat(store.get('doska.follow'));
+    return Number.isFinite(v)?Math.min(1,Math.max(0.12,v)):1-STREAMLINE;})(),
   // cap — что мне можно на этой доске: owner | edit | view | none
   locked:false,cap:'none',anyEdit:false,me:null,you:null,following:false,
   boardId:null,name:store.get('doska.name')||'',
@@ -379,10 +390,16 @@ const toScreen=(wx,wy)=>({x:wx*S.cam.z+S.cam.x, y:wy*S.cam.z+S.cam.y});
 
 const mkStroke=(type,color,size,id,by)=>({id,by,type,color,size,pts:[],bbox:null,g:null,locked:false});
 
+/* Линия тянется за указателем не мгновенно: каждая новая точка ставится не
+   там, где мышь, а на доле пути к ней. Это гасит дрожание руки — мышью иначе
+   получается «пила». Доля и есть чувствительность: на единице линия идёт точно
+   за указателем и повторяет каждое подрагивание, ниже — мягче и спокойнее.
+
+   STREAMLINE осталась значением по умолчанию для тех, кто ничего не трогал. */
 function pushPoint(s,wx,wy,p){
   const pts=s.pts;
   if(!pts.length){pts.push({x:wx,y:wy,p});return true;}
-  const last=pts[pts.length-1], t=1-STREAMLINE;
+  const last=pts[pts.length-1], t=S.follow;
   const nx=last.x+(wx-last.x)*t, ny=last.y+(wy-last.y)*t;
   if(Math.hypot(nx-last.x,ny-last.y)<0.35/S.cam.z){last.p=last.p*0.7+p*0.3;return false;}
   pts.push({x:nx,y:ny,p});return true;
@@ -1071,8 +1088,12 @@ function selectionBox(){
 }
 function refreshSelBar(){
   const bar=document.getElementById('selbar');
-  bar.classList.toggle('show',selection.length>0);
-  if(!selection.length)return;
+  // Пока объект тащат, тянут за ручку или поворачивают, панель убирается: она
+  // висит над рамкой и в жесте только мешает — закрывает то, что двигают, и
+  // подсовывает корзину под руку.
+  const busy=!!dragging||!!marquee;
+  bar.classList.toggle('show',selection.length>0&&!busy);
+  if(!selection.length||busy)return;
   const b=selectionBox();
   const p=toScreen(b.x0,b.y0);
   bar.style.left=Math.max(8,Math.min(innerWidth-260,p.x))+'px';
@@ -1140,6 +1161,18 @@ function handlesFor(it){
     {name:'nw',kind:'corner',sx:s.nw.x,sy:s.nw.y},{name:'ne',kind:'corner',sx:s.ne.x,sy:s.ne.y},
     {name:'sw',kind:'corner',sx:s.sw.x,sy:s.sw.y},{name:'se',kind:'corner',sx:s.se.x,sy:s.se.y}
   ];
+  /* Середины сторон тянут объект по одной оси: угол меняет обе сразу и держит
+     пропорции, а вытянуть только вширь ими нельзя. На мелком выделении их не
+     показываем — они слиплись бы с углами. */
+  const mid=(a,b)=>({x:(a.x+b.x)/2,y:(a.y+b.y)/2});
+  const wide=Math.hypot(s.ne.x-s.nw.x,s.ne.y-s.nw.y)>44;
+  const tall=Math.hypot(s.sw.x-s.nw.x,s.sw.y-s.nw.y)>44;
+  const edges={n:[mid(s.nw,s.ne),wide],s:[mid(s.sw,s.se),wide],
+               w:[mid(s.nw,s.sw),tall],e:[mid(s.ne,s.se),tall]};
+  for(const name in edges){
+    const [p,show]=edges[name];
+    if(show)handles.push({name,kind:'edge',sx:p.x,sy:p.y});
+  }
   const midW={x:(corners.nw.x+corners.ne.x)/2,y:(corners.nw.y+corners.ne.y)/2};
   const midS=toScreen(midW.x,midW.y);
   const ux=Math.sin(rot),uy=-Math.cos(rot);
@@ -1165,7 +1198,9 @@ function startMove(w){
   if(!list.length)return;
   dragging={mode:'move',list:list.map(it=>({it,start:snapshotItem(it)})),w0:w};
 }
-const OPPOSITE_CORNER={nw:'se',ne:'sw',sw:'ne',se:'nw'};
+/* Неподвижная точка при растяжении: для угла — противоположный угол, для
+   середины стороны — середина противоположной стороны. */
+const OPPOSITE_CORNER={nw:'se',ne:'sw',sw:'ne',se:'nw',n:'s',s:'n',w:'e',e:'w'};
 /* снимок объекта на начало драга — pts копируются глубоко (это отдельные
    {x,y,p}-объекты), иначе before/after в истории ссылались бы на один
    и тот же массив и undo не смог бы восстановить исходную форму */
@@ -1214,18 +1249,24 @@ stage.addEventListener('pointerdown',e=>{
       }else{
         const anchor=OPPOSITE_CORNER[h.name];
         const geom=snapshotItem(selected);
+        // по какой оси тянем: у середины стороны — только по одной
+        const axis=h.kind==='edge'?(h.name==='n'||h.name==='s'?'y':'x'):'xy';
         let anchorWorld,rot0=0;
         if(BOX_TYPES.has(selected.type)){
           rot0=geom.rot||0;
           const stcx=geom.x+geom.w/2, stcy=geom.y+geom.h/2;
-          const ax0=anchor.includes('e')?geom.w/2:-geom.w/2, ay0=anchor.includes('s')?geom.h/2:-geom.h/2;
+          const ax0=axis==='y'?0:(anchor.includes('e')?geom.w/2:-geom.w/2);
+          const ay0=axis==='x'?0:(anchor.includes('s')?geom.h/2:-geom.h/2);
           const p=rotAround(stcx+ax0,stcy+ay0,stcx,stcy,rot0);
           anchorWorld={x:p.x,y:p.y};
         }else{
           const b0=bboxOf(geom);
-          anchorWorld={x:anchor.includes('e')?b0.x1:b0.x0, y:anchor.includes('s')?b0.y1:b0.y0};
+          anchorWorld={
+            x:axis==='y'?(b0.x0+b0.x1)/2:(anchor.includes('e')?b0.x1:b0.x0),
+            y:axis==='x'?(b0.y0+b0.y1)/2:(anchor.includes('s')?b0.y1:b0.y0)
+          };
         }
-        dragging={mode:'resize',it:selected,corner:h.name,anchor,anchorWorld,rot0,start:geom};
+        dragging={mode:'resize',it:selected,corner:h.name,anchor,axis,anchorWorld,rot0,start:geom};
       }
       return;
     }
@@ -1246,7 +1287,7 @@ stage.addEventListener('pointerdown',e=>{
     }
     // пусто под курсором — тянем рамку выделения
     if(!add)select(null);
-    if(canEdit())marquee={a:w,b:w};
+    if(canEdit()){marquee={a:w,b:w};refreshSelBar();}
     drawLive();
     return;
   }
@@ -1312,6 +1353,9 @@ stage.addEventListener('pointermove',e=>{
   }
   if(dragging){
     const w=toWorld(pt.x,pt.y);
+    // Панель прячем с первым движением, а не с нажатием: иначе она мигала бы
+    // на каждом клике по объекту, который просто выделяют.
+    if(!dragging.barHidden){dragging.barHidden=true;refreshSelBar();}
     if(dragging.mode==='move'){
       const dx=w.x-dragging.w0.x, dy=w.y-dragging.w0.y;
       for(const m of dragging.list){
@@ -1324,7 +1368,7 @@ stage.addEventListener('pointermove',e=>{
     }
     const it=dragging.it,st=dragging.start;
     if(dragging.mode==='resize'){
-      const corner=dragging.corner, anchor=dragging.anchor;
+      const corner=dragging.corner, anchor=dragging.anchor, axis=dragging.axis||'xy';
       if(BOX_TYPES.has(it.type)){
         // Ресайз в локальной (неповёрнутой) системе координат объекта:
         // переводим текущий указатель в локальные оси, откладывая от
@@ -1333,10 +1377,17 @@ stage.addEventListener('pointermove',e=>{
         const rot=dragging.rot0, cos=Math.cos(rot), sin=Math.sin(rot);
         const wx=w.x-dragging.anchorWorld.x, wy=w.y-dragging.anchorWorld.y;
         const locX=wx*cos+wy*sin, locY=-wx*sin+wy*cos;   // обратный поворот вектора на -rot
-        let nw=locX*(corner.includes('e')?1:-1);
-        nw=Math.max(16,nw);
-        const k=st.w/st.h, nh=nw/k;
-        const ax=anchor.includes('e')?nw/2:-nw/2, ay=anchor.includes('s')?nh/2:-nh/2;
+        let nw,nh;
+        if(axis==='x'){                                  // тянут за левую или правую сторону
+          nw=Math.max(16,locX*(corner==='e'?1:-1)); nh=st.h;
+        }else if(axis==='y'){                            // за верхнюю или нижнюю
+          nh=Math.max(16,locY*(corner==='s'?1:-1)); nw=st.w;
+        }else{                                           // за угол — обе стороны, пропорции целы
+          nw=Math.max(16,locX*(corner.includes('e')?1:-1));
+          nh=nw/(st.w/st.h);
+        }
+        const ax=axis==='y'?0:(anchor.includes('e')?nw/2:-nw/2);
+        const ay=axis==='x'?0:(anchor.includes('s')?nh/2:-nh/2);
         const offX=ax*cos-ay*sin, offY=ax*sin+ay*cos;    // R(rot)*(ax,ay)
         const cx=dragging.anchorWorld.x-offX, cy=dragging.anchorWorld.y-offY;
         it.w=nw; it.h=nh; it.rot=rot;
@@ -1345,8 +1396,9 @@ stage.addEventListener('pointermove',e=>{
         const b0=bboxOf(st);
         const w0=Math.max(1,b0.x1-b0.x0), h0=Math.max(1,b0.y1-b0.y0);
         const ax=dragging.anchorWorld.x, ay=dragging.anchorWorld.y;
-        let nw0=Math.max(8,Math.abs(w.x-ax)), nh0=Math.max(8,Math.abs(w.y-ay));
-        const sx=nw0/w0, sy=nh0/h0;
+        // за середину стороны тянем только одну ось, за угол — обе
+        const sx=axis==='y'?1:Math.max(8,Math.abs(w.x-ax))/w0;
+        const sy=axis==='x'?1:Math.max(8,Math.abs(w.y-ay))/h0;
         it.pts=st.pts.map(p=>('p' in p)?{x:ax+(p.x-ax)*sx,y:ay+(p.y-ay)*sy,p:p.p}:{x:ax+(p.x-ax)*sx,y:ay+(p.y-ay)*sy});
       }
     }else if(dragging.mode==='rotate'){
@@ -1482,6 +1534,7 @@ function endPointer(e){
       pushUndo(ops);
     }
     dragging=null;
+    refreshSelBar();                     // жест кончился — панель возвращается
   }
   if(marquee){
     const m=marquee;marquee=null;
@@ -1494,6 +1547,7 @@ function endPointer(e){
       selectMany(add?selection.concat(found.filter(it=>!inSelection(it))):found);
       if(selection.length>1)hint('Выделено объектов: '+selection.length+' · тащите за любой из них');
     }
+    refreshSelBar();
     drawLive();
   }
   if(shapeDraft){
@@ -1920,8 +1974,22 @@ document.getElementById('a1Sel').onchange=e=>{S.a1=+e.target.value;applyStyleToS
 document.getElementById('a2Sel').onchange=e=>{S.a2=+e.target.value;applyStyleToSelection('a2',S.a2);};
 sizeEl.oninput=()=>{S.size=+sizeEl.value;sizeVal.textContent=S.size;drawPreview();applyStyleToSelection('size',S.size);};
 
-/* Чувствительность запоминается в браузере, а не на доске: это привычка руки
+/* Обе настройки запоминаются в браузере, а не на доске: это привычка руки
    конкретного человека, а не свойство занятия. */
+const followEl=document.getElementById('follow'),followVal=document.getElementById('followVal');
+followEl.value=Math.round(S.follow*100);followVal.textContent=followEl.value;
+followEl.oninput=()=>{
+  S.follow=+followEl.value/100;
+  followVal.textContent=followEl.value;
+  store.set('doska.follow',String(S.follow));
+  document.getElementById('followHint').textContent=S.follow>=0.9
+    ?'Линия идёт след в след за мышью — заметно каждое подрагивание.'
+    :S.follow<=0.3
+      ?'Линия сильно сглажена: подрагивание не видно, но резкий угол смажется.'
+      :'Выше — линия идёт точно за мышью. Ниже — мягче, дрожание сглаживается.';
+  drawPreview();
+};
+
 const sensEl=document.getElementById('sens'),sensVal=document.getElementById('sensVal');
 sensEl.value=Math.round(S.sens*100);sensVal.textContent=sensEl.value;
 sensEl.oninput=()=>{
@@ -2229,9 +2297,35 @@ let menuAt=null;                                   // где щёлкнули, �
 
 function closeMenu(){menuEl.classList.remove('show');menuEl.innerHTML='';menuAt=null;}
 
-function menuItem(label,hotkey,fn,{off,on}={}){
+/* Значки к пунктам: глазом строка находится по картинке быстрее, чем по
+   тексту, а список тут длинный. */
+const MENU_ICONS={
+  dup:'<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
+  lock:'<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/>',
+  unlock:'<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 7.7-1.5"/>',
+  cut:'<circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8 16L18 4M16 16L6 4"/>',
+  copy:'<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/>',
+  paste:'<path d="M9 4h6v3H9z"/><path d="M9 5.5H7a2 2 0 0 0-2 2V19a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7.5a2 2 0 0 0-2-2h-2"/>',
+  group:'<path d="M10 13a4 4 0 0 1 0-5l1.5-1.5a4 4 0 0 1 5.6 5.6L16 13.5"/><path d="M14 11a4 4 0 0 1 0 5l-1.5 1.5a4 4 0 0 1-5.6-5.6L8 10.5"/>',
+  ungroup:'<path d="M10 13a4 4 0 0 1 0-5l1.5-1.5"/><path d="M14 11a4 4 0 0 1 0 5l-1.5 1.5"/><path d="M4 4l16 16"/>',
+  rotate:'<path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/>',
+  rotateBack:'<path d="M4 12a8 8 0 1 0 2.6-5.9"/><path d="M4 4v5h5"/>',
+  front:'<rect x="4" y="4" width="11" height="11" rx="1.5"/><path d="M9 20h9a2 2 0 0 0 2-2V9"/>',
+  back:'<rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M15 4H6a2 2 0 0 0-2 2v9"/>',
+  del:'<path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/>',
+  all:'<rect x="4" y="4" width="16" height="16" rx="2" stroke-dasharray="3 3"/>',
+  grid:'<path d="M3 9h18M3 15h18M9 3v18M15 3v18"/>'
+};
+function menuItem(label,hotkey,fn,{off,on,icon}={}){
   const b=document.createElement('button');
-  b.textContent=label;
+  if(icon&&MENU_ICONS[icon]){
+    const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+    svg.setAttribute('viewBox','0 0 24 24');
+    svg.innerHTML=MENU_ICONS[icon];
+    b.appendChild(svg);
+  }
+  const t=document.createElement('span');t.textContent=label;t.className='lbl';
+  b.appendChild(t);
   if(hotkey){const k=document.createElement('kbd');k.textContent=hotkey;b.appendChild(k);}
   if(off)b.disabled=true; else b.onclick=()=>{closeMenu();fn();};
   if(on)b.classList.add('on');
@@ -2253,33 +2347,35 @@ function openMenu(screenPt,worldPt){
   const grouped=selection.some(it=>it.g);
 
   if(sel){
-    menuItem('Дублировать','Ctrl+D',duplicateSelected,{off:!edit||!unlocked});
-    menuItem('Копировать','Ctrl+C',()=>copySelected(false));
-    menuItem('Вырезать','Ctrl+X',()=>copySelected(true),{off:!edit||!unlocked});
-    menuItem('Вставить','Ctrl+V',()=>pasteClipboard(worldPt),{off:!edit||!clipboard.length});
-    menuSep();
-    menuItem('Группировать','Ctrl+G',groupSelected,{off:!edit||selection.length<2});
-    menuItem('Разгруппировать','Ctrl+Shift+G',ungroupSelected,{off:!edit||!grouped});
-    menuSep();
-    menuItem('Повернуть на 90°','',()=>rotateSelection(Math.PI/2),{off:!edit||!unlocked});
-    menuItem('Повернуть на −90°','',()=>rotateSelection(-Math.PI/2),{off:!edit||!unlocked});
-    menuSep();
-    menuItem('На передний план',']',()=>moveLayer('front'),{off:!edit||!unlocked});
-    menuItem('На задний план','[',()=>moveLayer('back'),{off:!edit||!unlocked});
-    menuSep();
     const allLocked=selection.every(it=>it.locked);
-    menuItem(allLocked?'Разблокировать':'Заблокировать','',
-      ()=>document.getElementById('selLock').click(),{off:!edit});
+    menuItem('Дублировать','Ctrl+D',duplicateSelected,{off:!edit||!unlocked,icon:'dup'});
+    menuItem(allLocked?'Открепить от фона':'Закрепить на фоне','',
+      ()=>document.getElementById('selLock').click(),
+      {off:!edit,icon:allLocked?'unlock':'lock'});
+    menuSep();
+    menuItem('Вырезать','Ctrl+X',()=>copySelected(true),{off:!edit||!unlocked,icon:'cut'});
+    menuItem('Копировать','Ctrl+C',()=>copySelected(false),{icon:'copy'});
+    menuItem('Вставить','Ctrl+V',()=>pasteClipboard(worldPt),{off:!edit||!clipboard.length,icon:'paste'});
+    menuSep();
+    menuItem('Группировать','Ctrl+G',groupSelected,{off:!edit||selection.length<2,icon:'group'});
+    menuItem('Разгруппировать','Ctrl+Shift+G',ungroupSelected,{off:!edit||!grouped,icon:'ungroup'});
+    menuSep();
+    menuItem('Повернуть на 90°','',()=>rotateSelection(Math.PI/2),{off:!edit||!unlocked,icon:'rotate'});
+    menuItem('Повернуть влево','',()=>rotateSelection(-Math.PI/2),{off:!edit||!unlocked,icon:'rotateBack'});
+    menuSep();
+    menuItem('Переместить на передний план',']',()=>moveLayer('front'),{off:!edit||!unlocked,icon:'front'});
+    menuItem('Переместить на задний план','[',()=>moveLayer('back'),{off:!edit||!unlocked,icon:'back'});
+    menuSep();
     menuItem('Удалить','Del',()=>document.getElementById('selDel').click(),
-      {off:!edit||!unlocked});
+      {off:!edit||!unlocked,icon:'del'});
   }else{
-    menuItem('Вставить','Ctrl+V',()=>pasteClipboard(worldPt),{off:!edit||!clipboard.length});
-    menuItem('Выделить всё','Ctrl+A',selectAll,{off:!edit});
+    menuItem('Вставить','Ctrl+V',()=>pasteClipboard(worldPt),{off:!edit||!clipboard.length,icon:'paste'});
+    menuItem('Выделить всё','Ctrl+A',selectAll,{off:!edit,icon:'all'});
     menuSep();
     menuHead('Фон');
     for(const mode of GRID_MODES){
       menuItem(GRID_NAMES[mode][0].toUpperCase()+GRID_NAMES[mode].slice(1),'',
-        ()=>setGrid(mode),{on:S.grid===mode});
+        ()=>setGrid(mode),{on:S.grid===mode,icon:'grid'});
     }
   }
 
