@@ -1121,9 +1121,19 @@ const CURSOR={
    не вверх, и курсор должен говорить правду. Восемь готовых курсоров браузера
    идут через 45°, поэтому угол округляем до ближайшего. */
 const RESIZE_CURSORS=['ns-resize','nesw-resize','ew-resize','nwse-resize'];
+/* Курсора «поворот» в браузере нет, поэтому рисуем свой: круговая стрелка,
+   белая обводка под тёмной линией — чтобы читалась и на бумаге, и на тёмной
+   картинке. Число в конце — точка, которой курсор указывает. */
+const ROTATE_CURSOR="url(\"data:image/svg+xml;utf8,"+encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 26 26">'+
+  '<g fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">'+
+  '<path d="M20 13a7 7 0 1 1-2.3-5.2"/><path d="M20 4.5V9h-4.5"/></g>'+
+  '<g fill="none" stroke="#1A1C20" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+
+  '<path d="M20 13a7 7 0 1 1-2.3-5.2"/><path d="M20 4.5V9h-4.5"/></g></svg>')+"\") 13 13, grab";
+
 function handleCursor(h){
   if(!h)return null;
-  if(h.kind==='rotate')return 'grab';
+  if(h.kind==='rotate')return ROTATE_CURSOR;
   if(h.kind==='vertex')return 'move';
   const base={n:0,ne:45,e:90,se:135,s:180,sw:225,w:270,nw:315}[h.name];
   if(base===undefined)return 'move';
@@ -1802,6 +1812,10 @@ function endPointer(e){
         const w=toWorld(pt.x,pt.y);
         // щёлкнули по объекту вне выделения — сперва выделяем его, как это
         // делают все редакторы, иначе меню относилось бы непонятно к чему
+        // Рисовали фигуру — правая кнопка означает «хватит рисовать, дай
+        // поработать с нарисованным»: переключаем на выделение, иначе
+        // следующий же щелчок начал бы новую фигуру.
+        if(S.tool==='shape'||S.tool==='path'){abortDraft();setTool('select');}
         const under=itemAt(w);
         if(under&&mineOnly(under)&&!inSelection(under))selectMany(withGroup([under]));
         else if(!under)select(null);
