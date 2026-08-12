@@ -60,6 +60,10 @@
         border-radius:8px;cursor:pointer;font-size:12.5px;display:grid;place-items:center;white-space:nowrap}
   .mini:hover{background:var(--panel-2);color:var(--text)}
   .mini.on{background:#B3322B;color:#fff}
+  /* кнопка-значок: тот же размер, что и текстовая, но без подписи */
+  .mini.ic{padding:0;width:32px}
+  .mini.ic svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7;
+        stroke-linecap:round;stroke-linejoin:round}
   .mini.follow.on{background:#24468C;color:#fff}
   .dot{width:7px;height:7px;border-radius:50%;background:#E0A400;margin:0 3px 0 6px;flex:none}
   .dot.ok{background:#3FBF6F} .dot.off{background:#B3322B}
@@ -262,6 +266,15 @@
       </select>
     </div>
   </div>
+  <!-- У пера нажим приходит от стилуса, у мыши его нет: толщина берётся из
+       скорости. Здесь настраивается, насколько сильно. -->
+  <div id="sensRow" class="hidden">
+    <div class="label" style="margin-bottom:5px">Чувствительность мыши
+      <span id="sensVal" style="color:var(--text)">100</span>%</div>
+    <input type="range" id="sens" min="0" max="100" step="5" value="100">
+    <div class="label" style="margin-top:5px;font-size:11.5px" id="sensHint">
+      Чем быстрее ведёте, тем тоньше линия. На нуле линия ровная.</div>
+  </div>
 </div>
 
 <div class="top hidden" id="topBar">
@@ -284,11 +297,16 @@
   <button class="mini" id="home" title="К началу (0)">⌂</button>
 </div>
 
+<!-- Панель над выделением: только то, что нужно под рукой каждую минуту.
+     Остальное — дублирование, буфер, группы, слои — в меню по правой кнопке. -->
 <div class="selbar card" id="selbar">
   <span id="selCount" class="hidden" style="font-size:12px;color:var(--muted);padding:0 4px"></span>
-  <button class="mini" id="selDup" title="Дублировать (Ctrl+D)">Дублировать</button>
-  <button class="mini" id="selLock" title="Заблокировать позицию">Заблокировать</button>
-  <button class="mini" id="selDel">Удалить</button>
+  <button class="mini ic" id="selLock" title="Заблокировать положение">
+    <svg viewBox="0 0 24 24" id="selLockIcon"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 8 0"/></svg>
+  </button>
+  <button class="mini ic" id="selDel" title="Удалить (Del)">
+    <svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg>
+  </button>
 </div>
 
 <div class="menu card" id="menu"></div>
@@ -343,6 +361,8 @@ const GRID_NAMES={grid:'клетка',dots:'точки',lines:'линейка',n
 
 const S={tool:'pen',size:4,color:PENS[0],penColor:PENS[0],markerColor:MARKERS[0],
   cam:{x:0,y:0,z:1},grid:store.get('doska.grid')||'grid',
+  // насколько скорость руки меняет толщину линии: 1 — как было всегда, 0 — ровная
+  sens:(()=>{const v=parseFloat(store.get('doska.sens'));return Number.isFinite(v)?Math.min(1,Math.max(0,v)):1;})(),
   // cap — что мне можно на этой доске: owner | edit | view | none
   locked:false,cap:'none',anyEdit:false,me:null,you:null,following:false,
   boardId:null,name:store.get('doska.name')||'',
@@ -367,7 +387,18 @@ function pushPoint(s,wx,wy,p){
   if(Math.hypot(nx-last.x,ny-last.y)<0.35/S.cam.z){last.p=last.p*0.7+p*0.3;return false;}
   pts.push({x:nx,y:ny,p});return true;
 }
-const simPressure=(prev,speed)=>prev+(Math.max(0.28,Math.min(1,1-speed/2.4))-prev)*0.22;
+/* Нажим у мыши и пальца взять неоткуда, поэтому он выводится из скорости:
+   ведёшь быстро — линия тоньше. Насколько сильно — настраивается.
+
+   При S.sens=1 получается ровно то, что было раньше (порог 0.28, шкала 2.4).
+   Ниже — отклик слабее, на нуле линия совсем ровная: кому-то так спокойнее,
+   особенно когда пишут мышью, а не пером. */
+const simPressure=(prev,speed)=>{
+  const s=S.sens;
+  if(s<=0)return 1;
+  const target=Math.max(1-0.72*s,Math.min(1,1-speed*s/2.4));
+  return prev+(target-prev)*0.22;
+};
 
 function radii(s){
   const pts=s.pts,n=pts.length,half=s.size/2,thin=s.type==='marker'?0:0.62;
@@ -1048,11 +1079,17 @@ function refreshSelBar(){
   bar.style.top=Math.max(8,p.y-46)+'px';
   updateSelBar();
 }
+/* Замок открыт или закрыт — по нему и видно состояние, подпись не нужна. */
+const LOCK_OPEN='<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 7.7-1.5"/>';
+const LOCK_SHUT='<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/>';
+
 function updateSelBar(){
   const lockBtn=document.getElementById('selLock');
   if(!lockBtn||!selection.length)return;
   const allLocked=selection.every(it=>it.locked);
-  lockBtn.textContent=allLocked?'Разблокировать':'Заблокировать';
+  const icon=lockBtn.querySelector('svg');
+  if(icon)icon.innerHTML=allLocked?LOCK_SHUT:LOCK_OPEN;
+  lockBtn.title=allLocked?'Разблокировать положение':'Заблокировать положение';
   lockBtn.classList.toggle('on',allLocked);
   const cnt=document.getElementById('selCount');
   cnt.textContent=selection.length>1?selection.length+' объекта':'';
@@ -1796,7 +1833,15 @@ function syncShapesIcon(){
   const b=sel&&shapesMenu.querySelector(sel);
   if(b)shapesBtn.innerHTML=b.innerHTML;
 }
-shapesBtn.onclick=()=>shapesOpen(shapesMenu.classList.contains('hidden'));
+/* Щелчок по значку открывает список фигур и сразу берёт квадрат: раньше он
+   только раскрывал список, и приходилось делать второй клик, чтобы начать
+   рисовать. Если фигура уже выбрана — оставляем её, менять инструмент под
+   рукой человека не годится. */
+shapesBtn.onclick=()=>{
+  const opening=shapesMenu.classList.contains('hidden');
+  shapesOpen(opening);
+  if(opening&&S.tool!=='shape'&&S.tool!=='path'){S.shapeKind='rect';setTool('shape');}
+};
 // клик мимо закрывает список; capture — чтобы успеть до обработчиков холста
 document.addEventListener('pointerdown',e=>{
   if(shapesMenu.classList.contains('hidden'))return;
@@ -1841,6 +1886,8 @@ function setTool(t){
   document.getElementById('fillRow').classList.toggle('hidden',!fillable);
   document.getElementById('dashRow').classList.toggle('hidden',!fillable);
   document.getElementById('arrowRow').classList.toggle('hidden',t!=='path');
+  // скорость меняет толщину только у пера и маркера — у фигур её нет
+  document.getElementById('sensRow').classList.toggle('hidden',t!=='pen'&&t!=='marker');
   if(t!=='select'){select(null);marquee=null;}
   if(t==='pen'||t==='marker'){
     S.color=t==='marker'?S.markerColor:S.penColor;
@@ -1872,6 +1919,20 @@ document.querySelectorAll('.tool[data-path]').forEach(b=>b.onclick=()=>{
 document.getElementById('a1Sel').onchange=e=>{S.a1=+e.target.value;applyStyleToSelection('a1',S.a1);};
 document.getElementById('a2Sel').onchange=e=>{S.a2=+e.target.value;applyStyleToSelection('a2',S.a2);};
 sizeEl.oninput=()=>{S.size=+sizeEl.value;sizeVal.textContent=S.size;drawPreview();applyStyleToSelection('size',S.size);};
+
+/* Чувствительность запоминается в браузере, а не на доске: это привычка руки
+   конкретного человека, а не свойство занятия. */
+const sensEl=document.getElementById('sens'),sensVal=document.getElementById('sensVal');
+sensEl.value=Math.round(S.sens*100);sensVal.textContent=sensEl.value;
+sensEl.oninput=()=>{
+  S.sens=+sensEl.value/100;
+  sensVal.textContent=sensEl.value;
+  store.set('doska.sens',String(S.sens));
+  document.getElementById('sensHint').textContent=S.sens<=0
+    ?'Линия ровная: толщина не зависит от скорости.'
+    :'Чем быстрее ведёте, тем тоньше линия. На нуле линия ровная.';
+  drawPreview();
+};
 
 function drawPreview(){
   const w=prev.clientWidth||160,h=46;
@@ -2006,7 +2067,8 @@ function duplicateSelected(){
   pushUndo(clones.map(item=>({type:'add',item})));
   selectMany(clones);
 }
-document.getElementById('selDup').onclick=duplicateSelected;
+// Дублирование живёт в меню по правой кнопке и на Ctrl+D: над выделением
+// нужны только замок и корзина, остальное туда не помещается по смыслу.
 
 /* ═══════════════════ группы, слои, буфер ═══════════════════ */
 
@@ -2127,6 +2189,38 @@ function pasteClipboard(at){
   hint('Вставлено: '+clones.length+(clones.length===1?' объект':' объекта'));
 }
 
+/* Поворот выделенного на заданный угол — вокруг общего центра, тем же
+   способом, что и перетаскивание за ручку поворота: у прямоугольных объектов
+   меняется поле rot, у штрихов и линий поворачиваются сами точки. */
+function rotateSelection(delta){
+  const list=withGroup(selection).filter(it=>!it.locked);
+  if(!list.length)return;
+  const b=selectionBox();
+  const cx=(b.x0+b.x1)/2, cy=(b.y0+b.y1)/2;
+  const ops=[];
+  for(const it of list){
+    const before=snapGeom(it,it);
+    if(BOX_TYPES.has(it.type)){
+      // центр объекта тоже едет по окружности вокруг общего центра
+      const c=rotAround(it.x+it.w/2,it.y+it.h/2,cx,cy,delta);
+      it.x=c.x-it.w/2; it.y=c.y-it.h/2;
+      it.rot=(it.rot||0)+delta;
+    }else if(Array.isArray(it.pts)){
+      it.pts=it.pts.map(p=>{
+        const r=rotAround(p.x,p.y,cx,cy,delta);
+        return ('p' in p)?{x:r.x,y:r.y,p:p.p}:{x:r.x,y:r.y};
+      });
+    }else continue;
+    it.bbox=null;
+    const after=snapGeom(it,it);
+    ops.push({type:'move',id:it.id,before,after});
+    net.send({t:'move',id:it.id,...wireGeom(after)});
+  }
+  if(!ops.length)return;
+  pushUndo(ops);
+  drawBoard();refreshSelBar();drawLive();
+}
+
 /* ═══════════════════ меню по правой кнопке ═══════════════════
    Собирается заново на каждое открытие: пунктов немного, а держать их разметку
    в актуальном состоянии постоянно — лишний труд на каждое выделение. */
@@ -2166,6 +2260,9 @@ function openMenu(screenPt,worldPt){
     menuSep();
     menuItem('Группировать','Ctrl+G',groupSelected,{off:!edit||selection.length<2});
     menuItem('Разгруппировать','Ctrl+Shift+G',ungroupSelected,{off:!edit||!grouped});
+    menuSep();
+    menuItem('Повернуть на 90°','',()=>rotateSelection(Math.PI/2),{off:!edit||!unlocked});
+    menuItem('Повернуть на −90°','',()=>rotateSelection(-Math.PI/2),{off:!edit||!unlocked});
     menuSep();
     menuItem('На передний план',']',()=>moveLayer('front'),{off:!edit||!unlocked});
     menuItem('На задний план','[',()=>moveLayer('back'),{off:!edit||!unlocked});
