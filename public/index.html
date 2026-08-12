@@ -34,11 +34,25 @@
   .sep{height:1px;background:var(--edge);margin:3px 4px}
   /* выпадашка фигур живёт внутри самой панели инструментов: так она никогда
      не перекроет панель настроек слева и не требует расчёта координат */
-  .subtools{display:flex;flex-direction:column;gap:4px;padding:4px;
-    background:var(--panel-2);border-radius:10px}
-  .subtools .tool{width:34px;height:34px;border-radius:8px}
-  .subtools .tool svg{width:18px;height:18px}
+  /* Фигур много, поэтому список вынесен рядом с панелью и разложен по
+     разделам сеткой: столбиком он был бы длиннее экрана. */
+  .subtools{position:fixed;left:74px;top:50%;transform:translateY(-50%);
+    display:flex;flex-direction:column;gap:2px;padding:8px;width:196px;
+    max-height:calc(100vh - 24px);overflow-y:auto;
+    background:var(--panel);border:1px solid var(--edge);border-radius:var(--r);
+    box-shadow:0 14px 40px rgba(15,17,20,.28);z-index:12}
+  .subtools::-webkit-scrollbar{width:6px}
+  .subtools::-webkit-scrollbar-thumb{background:var(--edge);border-radius:3px}
+  .subtools .head{color:var(--muted);font-size:11px;letter-spacing:.04em;
+    text-transform:uppercase;padding:8px 2px 4px}
+  .subtools .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
+  .subtools .tool{width:100%;height:40px;border-radius:8px}
+  .subtools .tool svg{width:26px;height:26px}
   .tool:focus-visible,.mini:focus-visible,.ink:focus-visible,.btn:focus-visible,.card-act:focus-visible{outline:2px solid #7AA2FF;outline-offset:2px}
+  /* Атрибут hidden скрывает элемент только через слабое правило браузера, и
+     любое наше display его перебивает: значок «Только просмотр» из-за этого
+     висел у всех, включая преподавателя. */
+  [hidden]{display:none!important}
 
   .pen{position:fixed;left:74px;top:50%;transform:translateY(-50%);background:var(--panel);
     border:1px solid var(--edge);border-radius:var(--r);padding:12px;width:186px;display:flex;
@@ -223,14 +237,6 @@
   <button class="tool" data-tool="select" title="Выделить (4) · тяните рамку по пустому месту"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.5L10.5 19 5 3z"/></svg></button>
   <button class="tool" data-tool="hand" title="Рука (5 / пробел)"><svg viewBox="0 0 24 24"><path d="M8 12V5.5a1.5 1.5 0 0 1 3 0V11m0-.5V4.5a1.5 1.5 0 0 1 3 0V11m0-.5v-1a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-2.7L4.6 15a1.6 1.6 0 0 1 2.6-1.8L8 14.5"/></svg></button>
   <button class="tool" id="shapesBtn" aria-expanded="false" title="Фигуры и линии (6) — нажмите, чтобы выбрать"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1.5"/></svg></button>
-  <div class="subtools hidden" id="shapesMenu">
-    <button class="tool" data-shape="rect" title="Прямоугольник (R)"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1.5"/></svg></button>
-    <button class="tool" data-shape="ellipse" title="Эллипс (O)"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="8" ry="6"/></svg></button>
-    <button class="tool" data-path="line" title="Линия (L), стрелка — A"><svg viewBox="0 0 24 24"><path d="M4 20L20 4"/></svg></button>
-    <button class="tool" data-path="polyline" title="Ломаная (N)"><svg viewBox="0 0 24 24"><path d="M4 18l6-10 4 6 6-10"/></svg></button>
-    <button class="tool" data-path="curve" title="Кривая (C)"><svg viewBox="0 0 24 24"><path d="M4 18Q10 4 12 12T20 6"/></svg></button>
-    <button class="tool" data-path="polygon" title="Многоугольник (M)"><svg viewBox="0 0 24 24"><path d="M12 3l8 6-3 10H7L4 9z"/></svg></button>
-  </div>
   <div class="sep"></div>
   <button class="tool" id="undo" title="Отменить (Ctrl+Z)"><svg viewBox="0 0 24 24"><path d="M4 10h10a5 5 0 0 1 0 10h-4"/><path d="M8 6l-4 4 4 4"/></svg></button>
   <button class="tool" id="redo" title="Вернуть (Ctrl+Shift+Z)"><svg viewBox="0 0 24 24"><path d="M20 10H10a5 5 0 0 0 0 10h4"/><path d="M16 6l4 4-4 4"/></svg></button>
@@ -273,9 +279,9 @@
        скорости. Здесь настраивается, насколько сильно. -->
   <div id="sensRow" class="hidden">
     <div class="label" style="margin-bottom:5px">Чувствительность мыши
-      <span id="followVal" style="color:var(--text)">58</span>%</div>
-    <input type="range" id="follow" min="12" max="100" step="2" value="58">
-    <div class="label" style="margin-top:5px;font-size:11.5px" id="followHint">
+      <span id="mfollowVal" style="color:var(--text)">58</span>%</div>
+    <input type="range" id="mfollow" min="12" max="100" step="2" value="58">
+    <div class="label" style="margin-top:5px;font-size:11.5px" id="mfollowHint">
       Выше — линия идёт точно за мышью. Ниже — мягче, дрожание сглаживается.</div>
     <div class="label" style="margin:9px 0 5px">Толщина от скорости
       <span id="sensVal" style="color:var(--text)">100</span>%</div>
@@ -294,6 +300,9 @@
     <button class="mini" id="lock" hidden>Запретить рисовать</button>
     <button class="mini" id="gear" hidden title="Доступ к доске">Доступ</button>
     <button class="mini follow" id="follow" hidden>Следовать</button>
+    <!-- у преподавателя обратное действие: не самому идти за кем-то, а
+         подтянуть всех к тому месту, где он сейчас объясняет -->
+    <button class="mini" id="callAll" hidden title="Показать всем это место">Все ко мне</button>
   </div>
   <div class="card ro" id="readonly" hidden>Только просмотр</div>
 </div>
@@ -316,6 +325,12 @@
     <svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg>
   </button>
 </div>
+
+<!-- Список фигур собирается из каталога SHAPES при загрузке: держать два
+     перечня — в разметке и в коде — значит однажды их рассинхронить. Живёт вне
+     панели инструментов: у той свой transform, и он делал бы её рамкой для
+     этого списка, обрезая его по высоте. -->
+<div class="subtools hidden" id="shapesMenu"></div>
 
 <div class="menu card" id="menu"></div>
 
@@ -478,6 +493,13 @@ const BACK_TYPES=new Set(['image','embed']);
 const SELECTABLE=new Set(['image','pen','marker','shape','path']);
 
 /* поворот вокруг локального центра (cx,cy) на угол a — общая мини-утилита */
+/** Угол в диапазон (−180°, 180°]: 350° читается как −10°, так понятнее. */
+function normAngle(a){
+  let d=a*180/Math.PI;
+  d=((d+180)%360+360)%360-180;
+  return d;
+}
+
 function rotAround(px,py,cx,cy,a){
   const cos=Math.cos(a),sin=Math.sin(a),dx=px-cx,dy=py-cy;
   return {x:cx+dx*cos-dy*sin, y:cy+dx*sin+dy*cos};
@@ -508,19 +530,190 @@ function bboxOf(it){
 
 /* прямоугольник/эллипс — заливка, затем обводка; дэш в мировых единицах,
    чтобы паттерн масштабировался вместе с толщиной линии при зуме */
+/* ═══════════════════ каталог фигур ═══════════════════
+   Каждая фигура описана в единичном квадрате: 0 — левый верхний угол, 1 —
+   правый нижний. Дальше её растягивают под рамку объекта. Так добавление
+   новой фигуры — это строчка в таблице, а не правки в отрисовке, попадании
+   курсора и проверке на сервере.
+
+   out  — видимые контуры: массивы точек либо дуги
+   hid  — рёбра, скрытые за телом: рисуются пунктиром у объёмных фигур
+   fill — какой контур заливать (по умолчанию первый)
+
+   Дуга: {arc:[cx,cy,rx,ry,a0,a1]} углы в оборотах (0..1), по часовой. */
+const P=(...a)=>a;                                     // короче читается
+const SHAPES={
+  /* базовые многоугольники */
+  rect:      {out:[[P(0,0),P(1,0),P(1,1),P(0,1)]],closed:true},
+  triangle:  {out:[[P(.5,0),P(1,1),P(0,1)]],closed:true},
+  rtriangle: {out:[[P(0,0),P(1,1),P(0,1)]],closed:true},
+  trapezoid: {out:[[P(.25,0),P(.75,0),P(1,1),P(0,1)]],closed:true},
+  trapezoid2:{out:[[P(0,0),P(1,0),P(.75,1),P(.25,1)]],closed:true},
+  parallelogram:{out:[[P(.28,0),P(1,0),P(.72,1),P(0,1)]],closed:true},
+  rhombus:   {out:[[P(.5,0),P(1,.5),P(.5,1),P(0,.5)]],closed:true},
+  /* правильные многоугольники */
+  pentagon:  {out:[reg(5)],closed:true},
+  hexagon:   {out:[reg(6)],closed:true},
+  octagon:   {out:[reg(8)],closed:true},
+  star:      {out:[star5()],closed:true},
+  /* скруглённые */
+  ellipse:   {out:[{arc:[.5,.5,.5,.5,0,1]}],closed:true},
+  roundrect: {out:[{round:.18}],closed:true},
+  semicircle:{out:[[{arc:[.5,1,.5,1,.5,1]},P(0,1)]],closed:true},
+  quarter:   {out:[[P(1,1),{arc:[1,1,1,1,.5,.75]},P(1,1)]],closed:true},
+  /* Объёмные тела рисуются так, как их чертят от руки: видимые рёбра сплошные,
+     уходящие за тело — пунктиром (hid). Пунктир и делает фигуру объёмной на
+     глаз, без него получается плоская путаница линий. */
+  cube:      {out:[[P(.04,.34),P(.66,.34),P(.66,.96),P(.04,.96)],
+                   [P(.04,.34),P(.34,.04),P(.96,.04),P(.66,.34)],
+                   [P(.66,.34),P(.96,.04),P(.96,.66),P(.66,.96)]],closed:false},
+  cubeHidden:{out:[[P(.04,.34),P(.66,.34),P(.66,.96),P(.04,.96)],
+                   [P(.04,.34),P(.34,.04),P(.96,.04),P(.66,.34)],
+                   [P(.66,.34),P(.96,.04),P(.96,.66),P(.66,.96)]],
+              hid:[[P(.34,.04),P(.34,.66)],[P(.34,.66),P(.04,.96)],
+                   [P(.34,.66),P(.96,.66)]],closed:false},
+  box:       {out:[[P(.04,.44),P(.74,.44),P(.74,.94),P(.04,.94)],
+                   [P(.04,.44),P(.26,.16),P(.96,.16),P(.74,.44)],
+                   [P(.74,.44),P(.96,.16),P(.96,.66),P(.74,.94)]],
+              hid:[[P(.26,.16),P(.26,.66)],[P(.26,.66),P(.04,.94)],
+                   [P(.26,.66),P(.96,.66)]],closed:false},
+  cylinder:  {out:[[{arc:[.5,.17,.42,.12,0,1]}],
+                   [P(.08,.17),P(.08,.83)],[P(.92,.17),P(.92,.83)],
+                   [{arc:[.5,.83,.42,.12,0,.5]}]],
+              hid:[[{arc:[.5,.83,.42,.12,.5,1]}]],closed:false},
+  cone:      {out:[[P(.5,.05),P(.08,.82)],[P(.5,.05),P(.92,.82)],
+                   [{arc:[.5,.82,.42,.13,0,.5]}]],
+              hid:[[{arc:[.5,.82,.42,.13,.5,1]}]],closed:false},
+  frustcone: {out:[[{arc:[.5,.2,.24,.08,0,1]}],
+                   [P(.26,.2),P(.08,.82)],[P(.74,.2),P(.92,.82)],
+                   [{arc:[.5,.82,.42,.12,0,.5]}]],
+              hid:[[{arc:[.5,.82,.42,.12,.5,1]}]],closed:false},
+  sphere:    {out:[[{arc:[.5,.5,.46,.46,0,1]}],
+                   [{arc:[.5,.5,.46,.16,0,.5]}]],
+              hid:[[{arc:[.5,.5,.46,.16,.5,1]}]],closed:false},
+  pyramid:   {out:[[P(.5,.06),P(.1,.86),P(.6,.86),P(.5,.06)],
+                   [P(.5,.06),P(.9,.66),P(.6,.86)],[P(.9,.66),P(.6,.86)]],
+              hid:[[P(.4,.66),P(.1,.86)],[P(.4,.66),P(.9,.66)],[P(.4,.66),P(.5,.06)]],
+              closed:false},
+  frustum:   {out:[[P(.34,.16),P(.66,.16),P(.9,.86),P(.14,.86)],
+                   [P(.34,.16),P(.46,.06),P(.78,.06),P(.66,.16)],
+                   [P(.66,.16),P(.78,.06),P(.98,.7),P(.9,.86)]],
+              hid:[[P(.46,.06),P(.46,.7)],[P(.46,.7),P(.14,.86)],[P(.46,.7),P(.98,.7)]],
+              closed:false},
+  tetra:     {out:[[P(.5,.05),P(.95,.9),P(.05,.9),P(.5,.05)]],
+              hid:[[P(.5,.05),P(.45,.62)],[P(.45,.62),P(.05,.9)],[P(.45,.62),P(.95,.9)]],
+              closed:false},
+  prism:     {out:[[P(.28,.22),P(.6,.86),P(.02,.86),P(.28,.22)],
+                   [P(.28,.22),P(.56,.1)],[P(.6,.86),P(.88,.74)],
+                   [P(.56,.1),P(.88,.74)]],
+              hid:[[P(.02,.86),P(.3,.74)],[P(.3,.74),P(.56,.1)],[P(.3,.74),P(.88,.74)]],
+              closed:false},
+  octahedron:{out:[[P(.5,.04),P(.96,.5),P(.5,.96),P(.04,.5),P(.5,.04)],
+                   [P(.5,.04),P(.34,.62)],[P(.34,.62),P(.5,.96)],[P(.34,.62),P(.96,.5)]],
+              hid:[[P(.34,.62),P(.04,.5)]],closed:false}
+};
+
+/* Разделы списка — в том же порядке, что и в привычных досках. Линии и кривые
+   идут последними: они не фигуры, но живут под тем же значком. */
+const SHAPE_GROUPS=[
+  ['Базовые многоугольники',['rect','triangle','rtriangle','trapezoid',
+                             'trapezoid2','parallelogram','rhombus']],
+  ['Правильные многоугольники',['pentagon','hexagon','octagon','star']],
+  ['Скруглённые фигуры',['ellipse','roundrect','semicircle','quarter']],
+  ['Трёхмерные тела',['cube','cubeHidden','cylinder','box','pyramid','cone',
+                      'sphere','tetra','prism','octahedron','frustum','frustcone']],
+];
+const SHAPE_NAMES={
+  rect:'Прямоугольник',triangle:'Треугольник',rtriangle:'Прямоугольный треугольник',
+  trapezoid:'Трапеция',trapezoid2:'Трапеция вниз',parallelogram:'Параллелограмм',
+  rhombus:'Ромб',pentagon:'Пятиугольник',hexagon:'Шестиугольник',octagon:'Восьмиугольник',
+  star:'Звезда',ellipse:'Эллипс',roundrect:'Скруглённый прямоугольник',
+  semicircle:'Полукруг',quarter:'Четверть круга',cube:'Куб',cubeHidden:'Куб с рёбрами',
+  cylinder:'Цилиндр',box:'Параллелепипед',pyramid:'Пирамида',cone:'Конус',
+  sphere:'Сфера',tetra:'Тетраэдр',prism:'Призма',octahedron:'Октаэдр',
+  frustum:'Усечённая пирамида',frustcone:'Усечённый конус'
+};
+/* Кривые и линии — не фигуры, но выбираются оттуда же. */
+const PATH_KINDS=[['line','Линия'],['polyline','Ломаная'],
+                  ['curve','Кривая'],['polygon','Многоугольник']];
+
+/** Вершины правильного n-угольника, вписанного в единичный квадрат. */
+function reg(n){
+  const pts=[];
+  for(let i=0;i<n;i++){
+    const a=-Math.PI/2+i*2*Math.PI/n;
+    pts.push([.5+Math.cos(a)*.5,.5+Math.sin(a)*.5]);
+  }
+  return pts;
+}
+/** Пятиконечная звезда: чередование внешнего и внутреннего радиусов. */
+function star5(){
+  const pts=[];
+  for(let i=0;i<10;i++){
+    const a=-Math.PI/2+i*Math.PI/5, r=(i%2?0.21:0.5);
+    pts.push([.5+Math.cos(a)*r,.5+Math.sin(a)*r]);
+  }
+  return pts;
+}
+
+/** Один контур фигуры в путь холста, растянутый под рамку объекта. */
+function shapeContour(ctx,part,x,y,w,h){
+  ctx.beginPath();
+  if(part.round!==undefined){
+    const r=Math.min(w,h)*part.round;
+    ctx.roundRect(x,y,w,h,r);
+    return;
+  }
+  const list=Array.isArray(part)?part:[part];
+  let started=false;
+  for(const seg of list){
+    if(seg.arc){
+      const [cx,cy,rx,ry,a0,a1]=seg.arc;
+      ctx.ellipse(x+cx*w,y+cy*h,Math.max(.01,rx*w),Math.max(.01,ry*h),0,
+                  a0*6.2832,a1*6.2832);
+      started=true;
+    }else{
+      const px=x+seg[0]*w, py=y+seg[1]*h;
+      if(started)ctx.lineTo(px,py); else {ctx.moveTo(px,py);started=true;}
+    }
+  }
+}
+
 function paintShape(ctx,it){
   const rot=it.rot||0;
+  const spec=SHAPES[it.kind]||SHAPES.rect;
   ctx.save();
   if(rot){const cx=it.x+it.w/2,cy=it.y+it.h/2;ctx.translate(cx,cy);ctx.rotate(rot);ctx.translate(-cx,-cy);}
-  ctx.beginPath();
-  if(it.kind==='ellipse')ctx.ellipse(it.x+it.w/2,it.y+it.h/2,Math.max(0.01,it.w/2),Math.max(0.01,it.h/2),0,0,6.2832);
-  else ctx.rect(it.x,it.y,it.w,it.h);
-  if(it.fill){ctx.fillStyle=it.fill;ctx.fill();}
+
+  // заливка — только по первому контуру: он и есть силуэт фигуры
+  if(it.fill){
+    shapeContour(ctx,spec.out[0],it.x,it.y,it.w,it.h);
+    if(spec.closed!==false)ctx.closePath();
+    ctx.fillStyle=it.fill;ctx.fill();
+  }
   if(it.size>0){
     ctx.lineWidth=it.size;ctx.strokeStyle=it.color;
-    if(it.dash===1)ctx.setLineDash([it.size*3,it.size*2]);
-    else if(it.dash===2){ctx.setLineDash([it.size*0.1,it.size*2]);ctx.lineCap='round';}
-    ctx.stroke();
+    const dashOn=()=>{
+      if(it.dash===1)ctx.setLineDash([it.size*3,it.size*2]);
+      else if(it.dash===2){ctx.setLineDash([it.size*0.1,it.size*2]);ctx.lineCap='round';}
+      else ctx.setLineDash([]);
+    };
+    dashOn();
+    for(const part of spec.out){
+      shapeContour(ctx,part,it.x,it.y,it.w,it.h);
+      if(spec.closed!==false&&!part.round)ctx.closePath();
+      ctx.stroke();
+    }
+    // рёбра за телом — всегда пунктиром, независимо от стиля линии
+    if(spec.hid){
+      ctx.setLineDash([it.size*2,it.size*2]);
+      ctx.globalAlpha=0.75;
+      for(const part of spec.hid){
+        shapeContour(ctx,part,it.x,it.y,it.w,it.h);
+        ctx.stroke();
+      }
+      ctx.globalAlpha=1;
+    }
     ctx.setLineDash([]);
   }
   ctx.restore();
@@ -578,6 +771,36 @@ function paintItem(ctx,it){
   // неизвестные/будущие типы (conn/embed) — молча пропускаем, не роняем рендер
 }
 
+/** Контур фигуры ломаными в мировых координатах — для попадания курсора.
+    Дуги разбиваются на отрезки: точнее, чем нужно глазу, и не требует своей
+    формулы под каждую фигуру. */
+function shapeOutline(it){
+  const spec=SHAPES[it.kind]||SHAPES.rect;
+  const x=it.x,y=it.y,w=it.w,h=it.h;
+  const out=[];
+  for(const part of spec.out){
+    if(part.round!==undefined){                 // скруглённый прямоугольник
+      out.push([[x,y],[x+w,y],[x+w,y+h],[x,y+h],[x,y]]);
+      continue;
+    }
+    const list=Array.isArray(part)?part:[part];
+    const line=[];
+    for(const seg of list){
+      if(seg.arc){
+        const [cx,cy,rx,ry,a0,a1]=seg.arc;
+        const steps=24;
+        for(let i=0;i<=steps;i++){
+          const t=(a0+(a1-a0)*i/steps)*6.2832;
+          line.push([x+(cx+Math.cos(t)*rx)*w, y+(cy+Math.sin(t)*ry)*h]);
+        }
+      }else line.push([x+seg[0]*w, y+seg[1]*h]);
+    }
+    if(spec.closed!==false&&line.length>2)line.push(line[0]);
+    out.push(line);
+  }
+  return out;
+}
+
 /* точное попадание точки в объект, с допуском r (мировые единицы) — общее для
    ластика, выделения и hit-тестов будущих типов */
 function hitTest(it,w,r){
@@ -592,14 +815,21 @@ function hitTest(it,w,r){
     // незалитая фигура — реагирует только на клик у границы, не в пустой середине
     if(it.type==='shape'&&!it.fill){
       const tol=r+(it.size||0)/2+2;
-      if(it.kind==='ellipse'){
-        const rx=Math.abs(it.w)/2||1, ry=Math.abs(it.h)/2||1;
-        const lx=px-(it.x+it.w/2), ly=py-(it.y+it.h/2);
-        const nd=Math.hypot(lx/rx,ly/ry);
-        return Math.abs(nd-1)*Math.min(rx,ry)<tol;
+      // Считаем расстояние до контура, разложенного на отрезки. Один способ на
+      // все фигуры: у звезды и трапеции своей формулы всё равно не написать.
+      const segs=shapeOutline(it);
+      let best=Infinity;
+      for(const line of segs){
+        for(let i=0;i<line.length-1;i++){
+          const ax=line[i][0],ay=line[i][1];
+          const dx=line[i+1][0]-ax, dy=line[i+1][1]-ay;
+          const L2=dx*dx+dy*dy||1;
+          let t=((px-ax)*dx+(py-ay)*dy)/L2; t=Math.max(0,Math.min(1,t));
+          best=Math.min(best,Math.hypot(px-(ax+t*dx),py-(ay+t*dy)));
+          if(best<tol)return true;
+        }
       }
-      const dl=px-it.x, dr=(it.x+it.w)-px, dt=py-it.y, db=(it.y+it.h)-py;
-      return Math.min(dl,dr,dt,db)<tol;
+      return best<tol;
     }
     return true;
   }
@@ -786,6 +1016,28 @@ function flushLive(){
       }
     }
   }
+  /* Отсчёт угла при повороте: вертикальная нормаль, текущее направление и
+     подпись между ними. Без числа поворот на глаз не поставишь. */
+  if(dragging&&dragging.mode==='rotate'&&typeof dragging.angle==='number'){
+    const c=toScreen(dragging.cx,dragging.cy);
+    const R=Math.min(120,Math.max(54,dragging.armPx||90));
+    const a=dragging.angle*Math.PI/180;
+    lctx.strokeStyle='rgba(26,28,32,.55)';lctx.lineWidth=1;
+    lctx.beginPath();lctx.moveTo(c.x,c.y);lctx.lineTo(c.x,c.y-R);lctx.stroke();      // нормаль
+    lctx.beginPath();lctx.moveTo(c.x,c.y);
+    lctx.lineTo(c.x+Math.sin(a)*R,c.y-Math.cos(a)*R);lctx.stroke();                  // текущее
+    const txt=dragging.angle.toFixed(1)+'°';
+    lctx.font='12px ui-sans-serif,system-ui,sans-serif';
+    const tw=lctx.measureText(txt).width+12;
+    const bx=c.x-tw/2, by=c.y+6;
+    lctx.fillStyle='rgba(247,245,240,.96)';lctx.strokeStyle='rgba(26,28,32,.25)';
+    lctx.lineWidth=1;
+    lctx.beginPath();lctx.roundRect(bx,by,tw,20,5);lctx.fill();lctx.stroke();
+    lctx.fillStyle='#1A1C20';lctx.textAlign='center';lctx.textBaseline='middle';
+    lctx.fillText(txt,c.x,by+10);
+    lctx.textAlign='start';lctx.textBaseline='alphabetic';
+  }
+
   // группа: у каждого объекта своя тонкая рамка, у всей группы — общая.
   // Ручек нет намеренно: поворот и растяжение группы — отдельная история,
   // а перенос, копия, замок и удаление работают и без них.
@@ -864,11 +1116,29 @@ const CURSOR={
           '<path d="M14.2 5.4l2.6-2.6 4.4 4.4-2.6 2.6z" fill="#F2D33C" stroke="#16181C" stroke-width="1.25"/>',3,21),
   select:'default', hand:'grab', eraser:'none'
 };
+/* Стрелка на ручке показывает, куда потянется край. Направление считается с
+   учётом поворота объекта: у наклонённого прямоугольника «верхняя» ручка тянет
+   не вверх, и курсор должен говорить правду. Восемь готовых курсоров браузера
+   идут через 45°, поэтому угол округляем до ближайшего. */
+const RESIZE_CURSORS=['ns-resize','nesw-resize','ew-resize','nwse-resize'];
+function handleCursor(h){
+  if(!h)return null;
+  if(h.kind==='rotate')return 'grab';
+  if(h.kind==='vertex')return 'move';
+  const base={n:0,ne:45,e:90,se:135,s:180,sw:225,w:270,nw:315}[h.name];
+  if(base===undefined)return 'move';
+  const rot=(selected&&BOX_TYPES.has(selected.type)?(selected.rot||0):0)*180/Math.PI;
+  const a=((base+rot)%180+180)%180;                 // стрелка симметрична
+  return RESIZE_CURSORS[Math.round(a/45)%4];
+}
+
 function applyCursor(){
   stage.style.cursor = panning ? 'grabbing'
     : (spaceDown ? 'grab'
-    : (!canEdit() ? 'not-allowed' : (CURSOR[S.tool]||'crosshair')));
+    : (!canEdit() ? 'not-allowed'
+    : (hoverHandleCursor || (CURSOR[S.tool]||'crosshair'))));
 }
+let hoverHandleCursor=null;
 
 /* ═══════════════════ сеть ═══════════════════ */
 const net={
@@ -968,6 +1238,16 @@ const net={
         S.cam.z=m.cam.z*k;S.cam.x=m.cam.x*k;S.cam.y=m.cam.y*k;
         document.getElementById('zoom').textContent=Math.round(S.cam.z*100)+'%';
         drawBoard();drawLive();break;
+      }
+      // Преподаватель зовёт к себе — переносим, не спрашивая режим слежения:
+      // это разовое действие, а не подписка.
+      case 'goto':{
+        const k=board.clientWidth/(m.w||board.clientWidth);
+        S.cam.z=m.cam.z*k;S.cam.x=m.cam.x*k;S.cam.y=m.cam.y*k;
+        document.getElementById('zoom').textContent=Math.round(S.cam.z*100)+'%';
+        drawBoard();drawLive();refreshSelBar();
+        hint('Преподаватель показывает это место');
+        break;
       }
     }
   },
@@ -1409,6 +1689,10 @@ stage.addEventListener('pointermove',e=>{
       }else if(Array.isArray(st.pts)){
         it.pts=st.pts.map(p=>{const r=rotAround(p.x,p.y,dragging.cx,dragging.cy,delta);return('p' in p)?{x:r.x,y:r.y,p:p.p}:{x:r.x,y:r.y};});
       }
+      // Угол показываем от вертикали — «на сколько наклонили». У прямоугольных
+      // объектов это их собственный угол, у штрихов и линий своего угла нет,
+      // поэтому считаем поворот за текущий жест.
+      dragging.angle=normAngle(BOX_TYPES.has(it.type)?(it.rot||0):delta);
     }else if(dragging.mode==='vertex'){
       it.pts=st.pts.map((p,i)=>i===dragging.index?{x:w.x,y:w.y}:p);
     }
@@ -1438,6 +1722,12 @@ stage.addEventListener('pointermove',e=>{
     drawLive();return;
   }
   if(erasing){eraseAt(pt);return;}
+
+  // Наведение на ручку — меняем курсор на стрелку нужного направления.
+  if(!dragging&&S.tool==='select'&&selected){
+    const c=handleCursor(handleAt(pt));
+    if(c!==hoverHandleCursor){hoverHandleCursor=c;applyCursor();}
+  }else if(hoverHandleCursor){hoverHandleCursor=null;applyCursor();}
 
   if(!current||e.pointerId!==drawId){
     if(e.pointerType!=='touch')net.cursor(toWorld(pt.x,pt.y));
@@ -1877,6 +2167,61 @@ document.querySelectorAll('[data-dash]').forEach(b=>{
    Значок показывает последнюю выбранную фигуру, нажатие открывает список.
    Горячие клавиши R/O/L/N/C/M работают напрямую, минуя список. */
 const shapesBtn=document.getElementById('shapesBtn'), shapesMenu=document.getElementById('shapesMenu');
+/* Значок фигуры — та же таблица, что и сама фигура, только в svg. Рисовать
+   иконки руками значило бы держать второе описание каждой формы. */
+function shapeIcon(kind){
+  const spec=SHAPES[kind]||SHAPES.rect;
+  const S0=2, W=20;                                  // поле значка 24×24 с отступом
+  const put=(part,dashed)=>{
+    if(part.round!==undefined)
+      return '<rect x="'+S0+'" y="'+S0+'" width="'+W+'" height="'+W+'" rx="'+(W*part.round)+'"/>';
+    const list=Array.isArray(part)?part:[part];
+    let d='',started=false;
+    for(const seg of list){
+      if(seg.arc){
+        const [cx,cy,rx,ry,a0,a1]=seg.arc;
+        const steps=20;
+        for(let i=0;i<=steps;i++){
+          const t=(a0+(a1-a0)*i/steps)*6.2832;
+          const x=S0+(cx+Math.cos(t)*rx)*W, y=S0+(cy+Math.sin(t)*ry)*W;
+          d+=(started?'L':'M')+x.toFixed(1)+' '+y.toFixed(1);started=true;
+        }
+      }else{
+        const x=S0+seg[0]*W, y=S0+seg[1]*W;
+        d+=(started?'L':'M')+x.toFixed(1)+' '+y.toFixed(1);started=true;
+      }
+    }
+    if(spec.closed!==false)d+='Z';
+    return '<path d="'+d+'"'+(dashed?' stroke-dasharray="2 2" opacity=".65"':'')+'/>';
+  };
+  let out='';
+  for(const p of spec.out)out+=put(p,false);
+  for(const p of (spec.hid||[]))out+=put(p,true);
+  return '<svg viewBox="0 0 24 24">'+out+'</svg>';
+}
+
+/** Список фигур собирается один раз при загрузке. */
+function buildShapesMenu(){
+  const box=document.getElementById('shapesMenu');
+  let html='';
+  for(const [title,kinds] of SHAPE_GROUPS){
+    html+='<div class="head">'+title+'</div><div class="grid">';
+    for(const k of kinds){
+      if(!SHAPES[k])continue;
+      html+='<button class="tool" data-shape="'+k+'" title="'+(SHAPE_NAMES[k]||k)+'">'+
+            shapeIcon(k)+'</button>';
+    }
+    html+='</div>';
+  }
+  html+='<div class="head">Линии и кривые</div><div class="grid">'+
+    '<button class="tool" data-path="line" title="Линия (L), стрелка — A"><svg viewBox="0 0 24 24"><path d="M4 20L20 4"/></svg></button>'+
+    '<button class="tool" data-path="polyline" title="Ломаная (N)"><svg viewBox="0 0 24 24"><path d="M4 18l6-10 4 6 6-10"/></svg></button>'+
+    '<button class="tool" data-path="curve" title="Кривая (C)"><svg viewBox="0 0 24 24"><path d="M4 18Q10 4 12 12T20 6"/></svg></button>'+
+    '<button class="tool" data-path="polygon" title="Многоугольник (M)"><svg viewBox="0 0 24 24"><path d="M12 3l8 6-3 10H7L4 9z"/></svg></button>'+
+    '</div>';
+  box.innerHTML=html;
+}
+
 function shapesOpen(on){
   shapesMenu.classList.toggle('hidden',!on);
   shapesBtn.setAttribute('aria-expanded',on?'true':'false');
@@ -1964,6 +2309,9 @@ document.querySelectorAll('.tool[data-tool]').forEach(b=>b.onclick=()=>{
   setTool(b.dataset.tool);
   if(same&&STYLED.has(b.dataset.tool)){S.panelOpen=!S.panelOpen;updatePenPanel();}
 });
+// Список фигур строится из каталога, поэтому кнопки надо создать до того, как
+// на них вешают обработчики.
+buildShapesMenu();
 document.querySelectorAll('.tool[data-shape]').forEach(b=>b.onclick=()=>{
   S.shapeKind=b.dataset.shape;setTool('shape');shapesOpen(false);
 });
@@ -1976,13 +2324,13 @@ sizeEl.oninput=()=>{S.size=+sizeEl.value;sizeVal.textContent=S.size;drawPreview(
 
 /* Обе настройки запоминаются в браузере, а не на доске: это привычка руки
    конкретного человека, а не свойство занятия. */
-const followEl=document.getElementById('follow'),followVal=document.getElementById('followVal');
+const followEl=document.getElementById('mfollow'),followVal=document.getElementById('mfollowVal');
 followEl.value=Math.round(S.follow*100);followVal.textContent=followEl.value;
 followEl.oninput=()=>{
   S.follow=+followEl.value/100;
   followVal.textContent=followEl.value;
   store.set('doska.follow',String(S.follow));
-  document.getElementById('followHint').textContent=S.follow>=0.9
+  document.getElementById('mfollowHint').textContent=S.follow>=0.9
     ?'Линия идёт след в след за мышью — заметно каждое подрагивание.'
     :S.follow<=0.3
       ?'Линия сильно сглажена: подрагивание не видно, но резкий угол смажется.'
@@ -2037,6 +2385,7 @@ function applyRole(){
   document.getElementById('lock').hidden=!owner;
   document.getElementById('gear').hidden=!owner;
   document.getElementById('follow').hidden=owner;
+  document.getElementById('callAll').hidden=!owner;
   document.getElementById('wipe').disabled=!owner;
   const lk=document.getElementById('lock');
   lk.classList.toggle('on',S.locked);
@@ -2091,6 +2440,11 @@ document.getElementById('lock').onclick=()=>net.send({t:'lock',on:!S.locked});
 document.getElementById('wipe').onclick=()=>{
   if(S.cap!=='owner')return;
   if(confirm('Очистить доску у всех участников? Это нельзя отменить.'))net.send({t:'clear'});
+};
+document.getElementById('callAll').onclick=()=>{
+  if(S.cap!=='owner')return;
+  net.send({t:'callAll',cam:{x:S.cam.x,y:S.cam.y,z:S.cam.z},w:board.clientWidth});
+  hint('Все участники перенесены к этому месту');
 };
 document.getElementById('follow').onclick=e=>{
   S.following=!S.following;

@@ -714,8 +714,18 @@ function cleanStyle(o) {
     fill: typeof o.fill === 'string' ? o.fill.slice(0, 24) : null
   };
 }
+/* Виды фигур. Список общий с клиентом (каталог SHAPES в index.html): здесь он
+   нужен, чтобы на доску не попало то, чего доска не умеет нарисовать. */
+const SHAPE_KINDS = new Set([
+  'rect', 'triangle', 'rtriangle', 'trapezoid', 'trapezoid2', 'parallelogram', 'rhombus',
+  'pentagon', 'hexagon', 'octagon', 'star',
+  'ellipse', 'roundrect', 'semicircle', 'quarter',
+  'cube', 'cubeHidden', 'cylinder', 'box', 'pyramid', 'cone',
+  'sphere', 'tetra', 'prism', 'octahedron', 'frustum', 'frustcone',
+]);
+
 function cleanShape(s, by) {
-  if (s.kind !== 'rect' && s.kind !== 'ellipse') return null;
+  if (!SHAPE_KINDS.has(s.kind)) return null;
   const num = (v, d) => Number.isFinite(+v) ? +v : d;
   return { id: String(s.id).slice(0, 48), by, type: 'shape', kind: s.kind,
            x: num(s.x, 0), y: num(s.y, 0),
@@ -978,6 +988,14 @@ wss.on('connection', (ws, req) => {
       case 'view':
         if (!owner) return;
         broadcast(room, { t: 'view', cam: m.cam, w: m.w }, ws);
+        return;
+
+      /* «Все ко мне»: преподаватель разово переносит участников к тому месту,
+         где объясняет. От 'view' отличается тем, что применяется независимо от
+         того, включил ли участник слежение. */
+      case 'callAll':
+        if (!owner) return;
+        broadcast(room, { t: 'goto', cam: m.cam, w: m.w }, ws);
         return;
 
       case 'lock':
