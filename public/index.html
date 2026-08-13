@@ -90,6 +90,8 @@
   .pop .who{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text)}
   .pop .who .av{margin-left:0}
   .pop .role{color:var(--muted);font-size:11.5px;margin-left:auto}
+  .pop .role-pick{margin-left:auto;background:var(--panel-2);color:var(--text);
+        border:1px solid var(--edge);border-radius:7px;padding:3px 6px;font-size:11.5px;cursor:pointer}
   .mini{border:0;background:transparent;color:var(--muted);height:30px;min-width:30px;padding:0 9px;
         border-radius:8px;cursor:pointer;font-size:12.5px;display:grid;place-items:center;white-space:nowrap}
   .mini:hover{background:var(--panel-2);color:var(--text)}
@@ -256,6 +258,7 @@
   <button class="tool on" data-tool="pen" title="Карандаш (1) · правая кнопка — настройки"><svg viewBox="0 0 24 24"><path d="M4 20l4-1 10-10a2.5 2.5 0 0 0-3.5-3.5L4.5 15.5 4 20z"/><path d="M13.5 6.5l4 4"/></svg></button>
   <button class="tool" data-tool="marker" title="Маркер (2) · правая кнопка — настройки"><svg viewBox="0 0 24 24"><path d="M9 15l-3 3v2h4l3-3"/><path d="M12 17L7 12l8-8a2.8 2.8 0 0 1 4 4l-7 9z"/></svg></button>
   <button class="tool" data-tool="eraser" title="Ластик (3)"><svg viewBox="0 0 24 24"><path d="M8 20h12"/><path d="M15.5 4.5l4 4a2 2 0 0 1 0 2.8L12 19H8l-3.5-3.5a2 2 0 0 1 0-2.8l8.2-8.2a2 2 0 0 1 2.8 0z"/></svg></button>
+  <button class="tool" data-tool="arc" title="Циркуль (K) · поставьте ножку и обведите"><svg viewBox="0 0 24 24"><path d="M12 3v3"/><path d="M12 6L6 21"/><path d="M12 6l6 15"/><path d="M4.5 16a10 10 0 0 0 15 0"/></svg></button>
   <button class="tool" data-tool="text" title="Надпись (T) · щёлкните по доске и печатайте"><svg viewBox="0 0 24 24"><path d="M5 6h14M12 6v13M9 19h6"/></svg></button>
   <button class="tool" data-tool="select" title="Выделить (4) · тяните рамку по пустому месту"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.5L10.5 19 5 3z"/></svg></button>
   <button class="tool" data-tool="hand" title="Рука (5 / пробел)"><svg viewBox="0 0 24 24"><path d="M8 12V5.5a1.5 1.5 0 0 1 3 0V11m0-.5V4.5a1.5 1.5 0 0 1 3 0V11m0-.5v-1a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-2.7L4.6 15a1.6 1.6 0 0 1 2.6-1.8L8 14.5"/></svg></button>
@@ -332,9 +335,9 @@
     <button class="mini ic" id="gear" hidden title="Доступ к доске">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.2M12 18.8V21M21 12h-2.2M5.2 12H3M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6M18.4 18.4l-1.6-1.6M7.2 7.2L5.6 5.6"/></svg>
     </button>
-    <button class="mini ic" id="lock" hidden title="Запретить рисовать">
-      <svg viewBox="0 0 24 24" id="lockIcon"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 7.7-1.5"/></svg>
-    </button>
+    <!-- Общий запрет рисовать переехал в окно доступа: чаще нужно унять
+         одного участника, а не всю доску, и это делается списком напротив
+         его имени. Здесь кнопка только занимала место. -->
     <button class="mini ic follow" id="follow" hidden title="Следовать за преподавателем">
       <svg viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.6"/></svg>
     </button>
@@ -424,7 +427,7 @@ const PENS=['#1A1C20','#24468C','#B3322B','#2E6B47','#6B3FA0'];
 const MARKERS=['#F2D33C','#7ED9C4','#F79BB0','#9DC5F5','#C9E36B'];
 const FILLS=[null,'#F2D33C','#7ED9C4','#F79BB0','#9DC5F5','#C9E36B'];
 const STREAMLINE=0.42;
-const STYLED=new Set(['pen','marker','shape','path','text']);
+const STYLED=new Set(['pen','marker','shape','path','text','arc']);
 
 const stage=document.getElementById('stage');
 const board=document.getElementById('board'), live=document.getElementById('live');
@@ -542,7 +545,12 @@ const BOX_TYPES=new Set(['image','shape','embed','text']);
 // (фигуры сюда не входят — они в общем z-порядке наравне со штрихами)
 const BACK_TYPES=new Set(['image','embed']);
 // кто сейчас реально выделяем инструментом "выделить"
-const SELECTABLE=new Set(['image','pen','marker','shape','path','text']);
+const SELECTABLE=new Set(['image','pen','marker','shape','path','text','arc']);
+/* Дуга циркуля живёт особняком: у неё нет ширины и высоты, только центр,
+   радиус и два угла. Растянуть её нельзя — растянутая дуга перестаёт быть
+   дугой окружности, — поэтому ручек размера у неё не будет, а будут ручки
+   углов. */
+const ARC_TYPES=new Set(['arc']);
 
 /* поворот вокруг локального центра (cx,cy) на угол a — общая мини-утилита */
 /** Угол в диапазон (−180°, 180°]: 350° читается как −10°, так понятнее. */
@@ -557,9 +565,35 @@ function rotAround(px,py,cx,cy,a){
   return {x:cx+dx*cos-dy*sin, y:cy+dx*sin+dy*cos};
 }
 
+/** Точка на дуге по углу. */
+const arcPt=(it,a)=>({x:it.cx+Math.cos(a)*it.r, y:it.cy+Math.sin(a)*it.r});
+/** Нормализованный размах дуги: всегда вперёд по часовой, 0…2π. */
+const arcSweep=it=>{
+  let d=it.a1-it.a0;
+  while(d<0)d+=Math.PI*2;
+  while(d>Math.PI*2)d-=Math.PI*2;
+  return d;
+};
+
 function bboxOf(it){
   // у надписи своя высота не хранится — считаем по числу строк
   if(it.type==='text')it.h=textHeight(bctx,it);
+  if(ARC_TYPES.has(it.type)){
+    // Рамка по самой дуге, а не по всей окружности: иначе у четвертинки она
+    // была бы вчетверо больше нарисованного и выделение выглядело бы враньём.
+    const sw=arcSweep(it);
+    let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
+    const add=p=>{if(p.x<x0)x0=p.x;if(p.y<y0)y0=p.y;if(p.x>x1)x1=p.x;if(p.y>y1)y1=p.y;};
+    add(arcPt(it,it.a0));add(arcPt(it,it.a0+sw));
+    // крайние точки окружности учитываем, только если дуга через них проходит
+    for(let k=0;k<4;k++){
+      const a=k*Math.PI/2;
+      let d=a-it.a0;while(d<0)d+=Math.PI*2;
+      if(d<=sw)add(arcPt(it,a));
+    }
+    const pad=(it.size||1)/2;
+    return {x0:x0-pad,y0:y0-pad,x1:x1+pad,y1:y1+pad};
+  }
   if(BOX_TYPES.has(it.type)){
     const rot=it.rot||0;
     if(!rot)return{x0:it.x,y0:it.y,x1:it.x+it.w,y1:it.y+it.h};
@@ -822,8 +856,23 @@ function paintItem(ctx,it){
   if(it.type==='shape'){paintShape(ctx,it);return;}
   if(it.type==='path'){paintPath(ctx,it);return;}
   if(it.type==='text'){paintText(ctx,it);return;}
+  if(it.type==='arc'){paintArc(ctx,it);return;}
   if(it.type==='pen'||it.type==='marker'){paintStroke(ctx,it);return;}
   // неизвестные/будущие типы (conn/embed) — молча пропускаем, не роняем рендер
+}
+
+/** Дуга циркуля: центр, радиус, два угла. Заливки у неё нет — циркуль ничего
+    не закрашивает. */
+function paintArc(ctx,it){
+  if(!(it.r>0))return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(it.cx,it.cy,it.r,it.a0,it.a0+arcSweep(it));
+  ctx.lineWidth=it.size;ctx.strokeStyle=it.color;ctx.lineCap='round';
+  if(it.dash===1)ctx.setLineDash([it.size*3,it.size*2]);
+  else if(it.dash===2)ctx.setLineDash([it.size*0.1,it.size*2]);
+  ctx.stroke();
+  ctx.restore();
 }
 
 /* ═══════════════════ надписи ═══════════════════
@@ -935,6 +984,17 @@ function hitTest(it,w,r){
       return best<tol;
     }
     return true;
+  }
+  if(ARC_TYPES.has(it.type)){
+    // Попадание по дуге: расстояние до окружности плюс проверка, что угол
+    // лежит внутри размаха. Иначе клик по «пустой» части круга ловил бы дугу.
+    const dx=w.x-it.cx, dy=w.y-it.cy;
+    const dist=Math.abs(Math.hypot(dx,dy)-it.r);
+    if(dist>r+(it.size||0)/2)return false;
+    let d=Math.atan2(dy,dx)-it.a0;
+    while(d<0)d+=Math.PI*2;
+    const tolA=(r+(it.size||0)/2)/Math.max(1,it.r);   // допуск у концов дуги
+    return d<=arcSweep(it)+tolA||d>=Math.PI*2-tolA;
   }
   if(!Array.isArray(it.pts))return false;
   // Штрихи проверяются так же, как линии, — по отрезкам. Раньше здесь стояла
@@ -1060,6 +1120,22 @@ function flushLive(){
   };
   if(current)drawTmp(current);
   for(const s of remoteLive.values())drawTmp(s);
+  if(arcDraft&&arcDraft.a0!==null){
+    // Ножка циркуля и сама дуга, пока её обводят.
+    paintArc(lctx,{cx:arcDraft.cx,cy:arcDraft.cy,r:arcDraft.r,
+                   a0:arcDraft.a0,a1:arcDraft.a1,
+                   color:S.color,size:S.size/S.cam.z,dash:S.dash});
+    lctx.save();
+    lctx.strokeStyle='rgba(47,128,237,.5)';lctx.lineWidth=1/S.cam.z;
+    lctx.setLineDash([4/S.cam.z,4/S.cam.z]);
+    lctx.beginPath();lctx.moveTo(arcDraft.cx,arcDraft.cy);
+    const tip=arcPt(arcDraft,arcDraft.a1);
+    lctx.lineTo(tip.x,tip.y);lctx.stroke();
+    lctx.setLineDash([]);
+    lctx.fillStyle='#2F80ED';
+    lctx.beginPath();lctx.arc(arcDraft.cx,arcDraft.cy,3/S.cam.z,0,6.2832);lctx.fill();
+    lctx.restore();
+  }
   if(shapeDraft){
     const d=shapeDraft;
     const x0=Math.min(d.a.x,d.b.x), y0=Math.min(d.a.y,d.b.y);
@@ -1122,7 +1198,8 @@ function flushLive(){
   }
   /* Отсчёт угла при повороте: вертикальная нормаль, текущее направление и
      подпись между ними. Без числа поворот на глаз не поставишь. */
-  if(dragging&&dragging.mode==='rotate'&&typeof dragging.angle==='number'){
+  if(dragging&&(dragging.mode==='rotate'||dragging.mode==='angle')&&
+     typeof dragging.angle==='number'){
     const c=toScreen(dragging.cx,dragging.cy);
     const R=Math.min(120,Math.max(54,dragging.armPx||90));
     const a=dragging.angle*Math.PI/180;
@@ -1218,7 +1295,7 @@ const CURSOR={
           '<path d="M2.6 21.4l1.9-.5-1.4-1.4z" fill="#16181C"/>',2,22),
   marker:cur('<path d="M3 21l1.2-4.6 9.4-9.4 4.4 4.4-9.4 9.4L3 21z" fill="#FFFDF8" stroke="#16181C" stroke-width="1.25" stroke-linejoin="round"/>'+
           '<path d="M14.2 5.4l2.6-2.6 4.4 4.4-2.6 2.6z" fill="#F2D33C" stroke="#16181C" stroke-width="1.25"/>',3,21),
-  select:'default', hand:'grab', eraser:'none', text:'text'
+  select:'default', hand:'grab', eraser:'none', text:'text', arc:'crosshair'
 };
 /* Стрелка на ручке показывает, куда потянется край. Направление считается с
    учётом поворота объекта: у наклонённого прямоугольника «верхняя» ручка тянет
@@ -1399,6 +1476,9 @@ const DEFLATE={
   shape:it=>({id:it.id,type:'shape',kind:it.kind,x:+it.x.toFixed(1),y:+it.y.toFixed(1),w:+it.w.toFixed(1),h:+it.h.toFixed(1),
               rot:+((it.rot||0).toFixed(4)),color:it.color,size:+it.size.toFixed(3),dash:it.dash||0,
               fill:it.fill||null,g:it.g||null,locked:!!it.locked}),
+  arc:it=>({id:it.id,type:'arc',cx:+it.cx.toFixed(1),cy:+it.cy.toFixed(1),r:+it.r.toFixed(1),
+            a0:+it.a0.toFixed(4),a1:+it.a1.toFixed(4),color:it.color,
+            size:+it.size.toFixed(3),dash:it.dash||0,g:it.g||null,locked:!!it.locked}),
   text:it=>({id:it.id,type:'text',text:it.text,x:+it.x.toFixed(1),y:+it.y.toFixed(1),
              w:+it.w.toFixed(1),rot:+((it.rot||0).toFixed(4)),color:it.color,
              size:+(+it.size).toFixed(2),bold:!!it.bold,italic:!!it.italic,
@@ -1416,6 +1496,8 @@ const deflate=it=>(DEFLATE[it.type]||deflateStroke)(it);
 const INFLATE={
   image:raw=>({...raw,rot:raw.rot||0,front:!!raw.front,g:raw.g||null,locked:!!raw.locked,bbox:null}),
   shape:raw=>({...raw,rot:raw.rot||0,dash:raw.dash||0,fill:raw.fill||null,g:raw.g||null,locked:!!raw.locked,bbox:null}),
+  arc:raw=>({...raw,r:raw.r||1,a0:raw.a0||0,a1:raw.a1||0,dash:raw.dash||0,
+             g:raw.g||null,locked:!!raw.locked,bbox:null}),
   text:raw=>({...raw,rot:raw.rot||0,w:raw.w||240,size:raw.size||24,
               bold:!!raw.bold,italic:!!raw.italic,g:raw.g||null,locked:!!raw.locked,bbox:null}),
   path:raw=>({...raw,pts:raw.pts.map(a=>({x:a[0],y:a[1]})),closed:!!raw.closed,
@@ -1456,6 +1538,9 @@ let pinch=null,panning=null,spaceDown=false,erasing=null,erasedBatch=[];
    смена стиля, а не ресайз общей рамки. */
 let selection=[];
 let selected=null,dragging=null,seqNo=0,shapeDraft=null,pathDraft=null,marquee=null;
+/* Начатая дуга: центр ставится нажатием, радиус и начальный угол берутся с
+   первым же движением, дальше палец обводит — как настоящим циркулем. */
+let arcDraft=null;
 
 const newId=()=>(S.me?S.me.id:'x')+'-'+(++seqNo)+'-'+Date.now().toString(36).slice(-4);
 const localXY=e=>{const r=stage.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};};
@@ -1546,6 +1631,15 @@ function itemAt(w){
    Заблокированный объект — пустой список: ни двигать, ни крутить, ни ресайзить. */
 function handlesFor(it){
   if(!it||it.locked||!SELECTABLE.has(it.type))return[];
+  /* У дуги ручек размера нет вовсе: тянуть её за угол значило бы растянуть, а
+     растянутая дуга перестаёт быть дугой окружности. Даём ровно то, что
+     циркулю и положено, — концы дуги, то есть углы. */
+  if(ARC_TYPES.has(it.type)){
+    const p0=arcPt(it,it.a0), p1=arcPt(it,it.a0+arcSweep(it));
+    const s0=toScreen(p0.x,p0.y), s1=toScreen(p1.x,p1.y);
+    return [{name:'a0',kind:'angle',end:0,sx:s0.x,sy:s0.y},
+            {name:'a1',kind:'angle',end:1,sx:s1.x,sy:s1.y}];
+  }
   let corners,rot=0;
   if(BOX_TYPES.has(it.type)){
     rot=it.rot||0;
@@ -1634,6 +1728,13 @@ stage.addEventListener('pointerdown',e=>{
   }
   if(e.button!==0&&e.pointerType==='mouse')return;
 
+  /* циркуль: нажали — поставили ножку, ведём — разводим и обводим */
+  if(S.tool==='arc'){
+    if(!canEdit())return hint('Преподаватель закрыл доску для правок');
+    arcDraft={cx:w.x,cy:w.y,r:0,a0:null,a1:0};
+    return;
+  }
+
   /* надпись: щелчок ставит её туда, куда указали */
   if(S.tool==='text'){
     const under=itemAt(w);
@@ -1652,6 +1753,8 @@ stage.addEventListener('pointerdown',e=>{
         const cy=BOX_TYPES.has(selected.type)?selected.y+selected.h/2:(b.y0+b.y1)/2;
         dragging={mode:'rotate',it:selected,start:snapshotItem(selected),cx,cy,
                   a0:Math.atan2(w.y-cy,w.x-cx)};
+      }else if(h.kind==='angle'){
+        dragging={mode:'angle',it:selected,end:h.end,start:snapshotItem(selected)};
       }else if(h.kind==='vertex'){
         dragging={mode:'vertex',it:selected,index:h.index,start:snapshotItem(selected)};
       }else{
@@ -1769,6 +1872,7 @@ stage.addEventListener('pointermove',e=>{
       for(const m of dragging.list){
         const t=m.it, s0=m.start;
         if(BOX_TYPES.has(t.type)){ t.x=s0.x+dx; t.y=s0.y+dy; }
+        else if(ARC_TYPES.has(t.type)){ t.cx=s0.cx+dx; t.cy=s0.cy+dy; }
         else if(Array.isArray(s0.pts)) t.pts=s0.pts.map(p=>('p' in p)?{x:p.x+dx,y:p.y+dy,p:p.p}:{x:p.x+dx,y:p.y+dy});
         t.bbox=bboxOf(t);
       }
@@ -1821,10 +1925,35 @@ stage.addEventListener('pointermove',e=>{
       // объектов это их собственный угол, у штрихов и линий своего угла нет,
       // поэтому считаем поворот за текущий жест.
       dragging.angle=normAngle(BOX_TYPES.has(it.type)?(it.rot||0):delta);
+    }else if(dragging.mode==='angle'){
+      // Радиус не трогаем принципиально: ручка меняет только угол, за это
+      // циркуль и отвечает. Показываем угол, как при повороте.
+      const a=Math.atan2(w.y-it.cy,w.x-it.cx);
+      if(dragging.end===0)it.a0=a; else it.a1=a;
+      dragging.angle=normAngle(arcSweep(it));
+      dragging.cx=it.cx;dragging.cy=it.cy;
     }else if(dragging.mode==='vertex'){
       it.pts=st.pts.map((p,i)=>i===dragging.index?{x:w.x,y:w.y}:p);
     }
     it.bbox=bboxOf(it);drawBoard();select(it);return;
+  }
+  if(arcDraft){
+    const w=toWorld(pt.x,pt.y);
+    const dx=w.x-arcDraft.cx, dy=w.y-arcDraft.cy;
+    arcDraft.r=Math.hypot(dx,dy);
+    const a=Math.atan2(dy,dx);
+    // начальный угол берём, когда ножку уже развели: у нулевого радиуса
+    // направления ещё нет
+    if(arcDraft.a0===null&&arcDraft.r*S.cam.z>6){arcDraft.a0=a;arcDraft.a1=a;}
+    else if(arcDraft.a0!==null){
+      // Накапливаем угол, а не приравниваем: иначе переход через −π выглядел бы
+      // как рывок в обратную сторону, и обвести полный круг было бы нельзя.
+      let d=a-arcDraft.a1;
+      while(d>Math.PI)d-=Math.PI*2;
+      while(d<-Math.PI)d+=Math.PI*2;
+      arcDraft.a1+=d;
+    }
+    drawLive();return;
   }
   if(marquee){marquee.b=toWorld(pt.x,pt.y);drawLive();return;}
   if(shapeDraft){
@@ -1892,6 +2021,8 @@ const GEOM_KEYS={
   path:['pts','color','size','dash','fill','a1','a2','locked'],
   // высоты у надписи нет: она считается из числа строк
   text:['x','y','w','rot','text','color','size','bold','italic','locked'],
+  // у дуги нет ширины и высоты: только центр, радиус и углы
+  arc:['cx','cy','r','a0','a1','color','size','dash','locked'],
   pen:['pts','locked'],marker:['pts','locked']
 };
 function geomKeys(it){return GEOM_KEYS[it.type]||[];}
@@ -1972,6 +2103,20 @@ function endPointer(e){
       if(selection.length>1)hint('Выделено объектов: '+selection.length+' · тащите за любой из них');
     }
     refreshSelBar();
+    drawLive();
+  }
+  if(arcDraft){
+    const d=arcDraft;arcDraft=null;
+    // совсем маленькую дугу не заводим: это был случайный тычок
+    if(d.a0!==null&&d.r*S.cam.z>=6&&Math.abs(d.a1-d.a0)*d.r*S.cam.z>=4){
+      const it={id:newId(),by:S.me&&S.me.id,type:'arc',
+                cx:d.cx,cy:d.cy,r:d.r,a0:d.a0,a1:d.a1,
+                color:S.color,size:S.size/S.cam.z,dash:S.dash,
+                g:null,locked:false,bbox:null};
+      addItem(it);
+      pushUndo([{type:'add',item:it}]);
+      net.send({t:'add',item:deflate(it)});
+    }
     drawLive();
   }
   if(shapeDraft){
@@ -2458,7 +2603,7 @@ document.addEventListener('pointerdown',e=>{
 /* ── панель настроек инструмента ───────────────────────────
    По умолчанию скрыта: холст важнее. Открывается правой кнопкой по значку
    инструмента и повторным нажатием по уже выбранному. */
-const PEN_TITLE={pen:'Перо',marker:'Маркер',shape:'Фигура',path:'Линия',text:'Надпись'};
+const PEN_TITLE={pen:'Перо',marker:'Маркер',shape:'Фигура',path:'Линия',text:'Надпись',arc:'Циркуль'};
 function updatePenPanel(){
   const on=S.panelOpen&&STYLED.has(S.tool)&&!!S.boardId;
   document.getElementById('penPanel').classList.toggle('hidden',!on);
@@ -2581,14 +2726,62 @@ function renderPeers(){
   if(!pop||pop.classList.contains('hidden'))return;
   fillPeersPop();
 }
-function fillPeersPop(){
+/* Список участников. У владельца доски напротив каждого — выбор, рисует он
+   или только смотрит. Напротив самого себя выбора нет: организатор не может
+   запретить рисовать себе, это была бы ловушка без выхода.
+
+   Раньше это жило одной кнопкой «запретить рисовать» на всех сразу. Кнопка
+   грубая: чаще нужно унять одного, а не всю доску. Общий замок остался в окне
+   доступа — он один умеет останавливать ещё и гостей по ссылке. */
+async function fillPeersPop(){
   const pop=document.getElementById('peersPop');
   const rows=[...peers.values()];
-  pop.innerHTML='<div class="label" style="margin-bottom:2px">Участники · '+rows.length+'</div>'+
-    rows.map(p=>'<div class="who"><div class="av" style="background:'+
-      (p.color||'#7A7368')+'">'+((p.name||'?').trim()[0]||'?').toUpperCase()+'</div>'+
-      '<span>'+escapeHtml(p.name||'Гость')+'</span>'+
-      '<span class="role">'+(CAP_NAME[p.cap]||'')+'</span></div>').join('');
+  const owner=S.cap==='owner';
+  pop.innerHTML='<div class="label" style="margin-bottom:2px">Участники · '+rows.length+'</div>';
+
+  // кто есть кто по учётным записям знает только владелец — ему и спрашиваем
+  let byName=new Map();
+  if(owner&&S.boardId){
+    try{
+      const d=await api('/boards/'+S.boardId+'/participants');
+      for(const p of d.participants||[])byName.set((p.name||'').trim(),p);
+    }catch{ /* не вышло — покажем без выбора, список всё равно полезен */ }
+  }
+
+  for(const p of rows){
+    const row=document.createElement('div');row.className='who';
+    const av=document.createElement('div');av.className='av';
+    av.style.background=p.color||'#7A7368';
+    av.textContent=((p.name||'?').trim()[0]||'?').toUpperCase();
+    const nm=document.createElement('span');
+    nm.textContent=(p.name||'Гость');
+    row.append(av,nm);
+
+    const clean=(p.name||'').replace(/\s*\(вы\)$/,'').trim();
+    const part=byName.get(clean);
+    if(owner&&p.cap!=='owner'&&part){
+      const sel=document.createElement('select');
+      sel.className='role-pick';
+      sel.innerHTML='<option value="edit">рисует</option><option value="view">смотрит</option>';
+      sel.value=part.access||'edit';
+      sel.title='Что можно этому участнику';
+      sel.onchange=async()=>{
+        const was=part.access;
+        try{
+          await api('/boards/'+S.boardId+'/participants/'+part.id,
+                    {method:'PATCH',body:{access:sel.value}});
+          part.access=sel.value;
+          hint(nm.textContent+(sel.value==='view'?' теперь только смотрит':' снова рисует'));
+        }catch(e){sel.value=was;hint('Не вышло: '+e.message);}
+      };
+      row.appendChild(sel);
+    }else{
+      const role=document.createElement('span');role.className='role';
+      role.textContent=CAP_NAME[p.cap]||'';
+      row.appendChild(role);
+    }
+    pop.appendChild(row);
+  }
 }
 const escapeHtml=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function setTitle(t){
@@ -2600,17 +2793,10 @@ function setTitle(t){
 }
 function applyRole(){
   const owner=S.cap==='owner';
-  document.getElementById('lock').hidden=!owner;
   document.getElementById('gear').hidden=!owner;
   document.getElementById('follow').hidden=owner;
   document.getElementById('callAll').hidden=!owner;
   document.getElementById('wipe').disabled=!owner;
-  const lk=document.getElementById('lock');
-  lk.classList.toggle('on',S.locked);
-  // подписи у кнопки больше нет — состояние показывает сам замок
-  lk.title=S.locked?'Рисование запрещено — нажмите, чтобы разрешить':'Запретить рисовать';
-  const li=document.getElementById('lockIcon');
-  if(li)li.innerHTML=S.locked?LOCK_SHUT:LOCK_OPEN;
   // наблюдателю инструменты правки ни к чему — пусть не выглядят рабочими
   const ro=S.cap==='view';
   document.getElementById('readonly').hidden=!ro;
@@ -2657,7 +2843,6 @@ document.getElementById('gridBtn').onclick=()=>{
   S.grid=GRID_MODES[(GRID_MODES.indexOf(S.grid)+1)%GRID_MODES.length];
   store.set('doska.grid',S.grid);hint('Фон: '+GRID_NAMES[S.grid]);drawBoard();
 };
-document.getElementById('lock').onclick=()=>net.send({t:'lock',on:!S.locked});
 document.getElementById('wipe').onclick=()=>{
   if(S.cap!=='owner')return;
   if(confirm('Очистить доску у всех участников? Это нельзя отменить.'))net.send({t:'clear'});
@@ -2725,6 +2910,8 @@ function duplicateSelected(){
   for(const src of list){
     const clone=BOX_TYPES.has(src.type)
       ?{...src,id:newId(),x:src.x+OFF,y:src.y+OFF,bbox:null,locked:false}
+      :ARC_TYPES.has(src.type)
+      ?{...src,id:newId(),cx:src.cx+OFF,cy:src.cy+OFF,bbox:null,locked:false}
       :{...src,id:newId(),pts:src.pts.map(p=>('p' in p)?{x:p.x+OFF,y:p.y+OFF,p:p.p}:{x:p.x+OFF,y:p.y+OFF}),bbox:null,locked:false};
     addItem(clone);
     net.send({t:'add',item:deflate(clone)});
@@ -2844,6 +3031,8 @@ function pasteClipboard(at){
     const g=it.g?(gmap.get(it.g)||gmap.set(it.g,newId()).get(it.g)):null;
     const clone=BOX_TYPES.has(it.type)
       ?{...it,id:newId(),by:S.me&&S.me.id,x:it.x+dx,y:it.y+dy,g,bbox:null,locked:false}
+      :ARC_TYPES.has(it.type)
+      ?{...it,id:newId(),by:S.me&&S.me.id,cx:it.cx+dx,cy:it.cy+dy,g,bbox:null,locked:false}
       :{...it,id:newId(),by:S.me&&S.me.id,g,bbox:null,locked:false,
         pts:it.pts.map(p=>('p' in p)?{x:p.x+dx,y:p.y+dy,p:p.p}:{x:p.x+dx,y:p.y+dy})};
     addItem(clone);
@@ -2866,7 +3055,11 @@ function rotateSelection(delta){
   const ops=[];
   for(const it of list){
     const before=snapGeom(it,it);
-    if(BOX_TYPES.has(it.type)){
+    if(ARC_TYPES.has(it.type)){
+      // дуга поворачивается своими углами: радиус при этом неприкосновенен
+      const c=rotAround(it.cx,it.cy,cx,cy,delta);
+      it.cx=c.x; it.cy=c.y; it.a0+=delta; it.a1+=delta;
+    }else if(BOX_TYPES.has(it.type)){
       // центр объекта тоже едет по окружности вокруг общего центра
       const c=rotAround(it.x+it.w/2,it.y+it.h/2,cx,cy,delta);
       it.x=c.x-it.w/2; it.y=c.y-it.h/2;
@@ -3065,6 +3258,7 @@ addEventListener('keydown',e=>{
   if(k==='1')setTool('pen'); if(k==='2')setTool('marker'); if(k==='3')setTool('eraser');
   if(k==='4')setTool('select'); if(k==='5')setTool('hand');
   if(k==='t')setTool('text');
+  if(k==='k')setTool('arc');
   if(k==='6')setTool('shape');
   if(k==='r'){S.shapeKind='rect';setTool('shape');}
   if(k==='o'){S.shapeKind='ellipse';setTool('shape');}
@@ -3211,6 +3405,13 @@ async function openSettings(id){
         '<p style="color:#8C9199;font-size:12.5px;margin:0 0 4px">'+
         'Список учеников доступен после входа через МЦКО. Сейчас доской можно '+
         'поделиться только ссылкой.</p>')+
+    // Общий замок: он один умеет останавливать и гостей по ссылке, у которых
+    // нет строки участника и, значит, нет своего списка.
+    '<div class="sub">Рисование на доске</div>'+
+    '<div class="row"><select id="stLock" style="flex:1">'+
+      '<option value="0">разрешено всем, кому дали доступ</option>'+
+      '<option value="1">запрещено — рисует только преподаватель</option>'+
+    '</select></div>'+
     '<div class="sub">Гостевая ссылка</div>'+
     '<div class="row"><select id="stGuest" style="flex:1">'+
       '<option value="none">выключена — только по аккаунту</option>'+
@@ -3233,6 +3434,7 @@ async function openSettings(id){
   $('#stTitle').textContent=board.title;
   $('#stGuest').value=board.guestAccess||'none';
   $('#stPolicy').value=board.objectEditPolicy||'creator';
+  $('#stLock').value=S.locked?'1':'0';
 
   /* Что ещё не применено. Раньше каждая правка уходила на сервер сразу, и было
      не видно, где заканчивается настройка: человек закрывал окно, не зная,
@@ -3318,6 +3520,9 @@ async function openSettings(id){
         err('');if(onOk)onOk();}
     catch(e){err(e.message);}
   };
+  // Замок идёт не через общий PATCH, а тем же сообщением, что и раньше: его
+  // должны немедленно увидеть все, кто сейчас на доске.
+  $('#stLock').onchange=()=>{pending.lock=$('#stLock').value==='1';sync();};
   $('#stGuest').onchange=()=>{pending.board.guest_access=$('#stGuest').value;sync();};
   $('#stPolicy').onchange=()=>{pending.board.object_edit_policy=$('#stPolicy').value;sync();};
 
@@ -3341,7 +3546,8 @@ async function openSettings(id){
         if(b&&d.board){b.guestAccess=d.board.guest_access;b.objectEditPolicy=d.board.object_edit_policy;}
       }
 
-      pending.board={};pending.add=[];pending.drop=[];pending.access={};
+      if(pending.lock!==null&&pending.lock!==S.locked)net.send({t:'lock',on:pending.lock});
+      pending.board={};pending.add=[];pending.drop=[];pending.access={};pending.lock=null;
       sync();err('');
       hint('Изменения сохранены');
       // Полотно берёт права в момент подключения, поэтому переподключаем его:

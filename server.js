@@ -763,6 +763,29 @@ function cleanText(t, by) {
            locked: !!t.locked };
 }
 
+/* Дуга циркуля.
+
+   Хранится тем, чем её и рисуют: центр, радиус и два угла. Держать её как
+   прямоугольник с шириной и высотой значило бы разрешить растянуть — а
+   растянутая дуга перестаёт быть дугой окружности, которую и чертят циркулем.
+   Поэтому у неё нет ни w, ни h, и менять у неё можно только углы. */
+function cleanArc(a, by) {
+  const num = (v, d) => Number.isFinite(+v) ? +v : d;
+  const ang = v => {
+    const x = +v;
+    return Number.isFinite(x) ? x : 0;
+  };
+  return { id: String(a.id).slice(0, 48), by, type: 'arc',
+           cx: num(a.cx, 0), cy: num(a.cy, 0),
+           r: Math.max(0.5, Math.min(40000, num(a.r, 50))),
+           a0: ang(a.a0), a1: ang(a.a1),
+           color: String(a.color || '#1A1C20').slice(0, 24),
+           size: Math.min(600, Math.max(0.1, num(a.size, 2))),
+           dash: [0, 1, 2].includes(+a.dash) ? +a.dash : 0,
+           g: clampGroup(a.g),
+           locked: !!a.locked };
+}
+
 /* общие поля стиля для фигур/линий (цвет, толщина, дэш, заливка) */
 function cleanStyle(o) {
   return {
@@ -812,7 +835,7 @@ function cleanPath(p, by) {
 /* реестр валидаторов по типу — новый тип регистрируется здесь один раз,
    вместо тернарника в add/restore. Незарегистрированный тип (штрихи,
    а также будущие типы до появления своего cleaner'а) идёт через cleanStroke. */
-const CLEANERS = { image: cleanImage, shape: cleanShape, path: cleanPath, text: cleanText };
+const CLEANERS = { image: cleanImage, shape: cleanShape, path: cleanPath, text: cleanText, arc: cleanArc };
 const pick = type => CLEANERS[type] || cleanStroke;
 
 /* PATCHABLE[type] — какие поля можно менять через 'move'; PATCH_CLAMP[type][key] —
@@ -833,6 +856,20 @@ const clampPts = (v, it) => {
 const clampG = (v, it) => v === null ? null : (typeof v === 'string' ? clampGroup(v) : it.g);
 
 const PATCH_CLAMP = {
+  /* У дуги правится положение и углы, но не радиус: растянутая дуга перестаёт
+     быть дугой окружности, а циркулем другой и не начертишь. Поэтому здесь нет
+     ни r, ни ширины с высотой — и «растянуть» её нечем даже вручную. */
+  arc: {
+    g: clampG,
+    cx: (v, it) => Number.isFinite(+v) ? +v : it.cx,
+    cy: (v, it) => Number.isFinite(+v) ? +v : it.cy,
+    a0: (v, it) => Number.isFinite(+v) ? +v : it.a0,
+    a1: (v, it) => Number.isFinite(+v) ? +v : it.a1,
+    color: (v, it) => typeof v === 'string' ? v.slice(0, 24) : it.color,
+    size: (v, it) => Number.isFinite(+v) ? Math.min(600, Math.max(0.1, +v)) : it.size,
+    dash: (v, it) => [0, 1, 2].includes(+v) ? +v : it.dash,
+    locked: (v) => !!v
+  },
   image: {
     g: clampG,
     // поднять картинку поверх записей можно только по прямой просьбе человека
