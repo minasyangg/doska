@@ -21,6 +21,7 @@ const db      = require('./lib/db');
 const session = require('./lib/session');
 const store   = require('./lib/store');        // журнал операций и снимки досок
 const pt      = require('./lib/points');       // точки в памяти лежат плотно
+const metrics = require('./lib/metrics');      // счётчики для мониторинга
 const cap_    = require('./lib/capability');   // с подчёркиванием: cap занято под уровень доступа
 
 const PORT     = process.env.PORT || 8080;
@@ -99,6 +100,7 @@ async function loadRoom(id) {
   }
 
   rooms.set(id, r);
+  metrics.inc('doska_room_loads_total');
   return r;
 }
 
@@ -546,10 +548,13 @@ async function handleUpload(req, res, url) {
       throw e;
     }
     dirSizes.delete(id);
+    metrics.inc('doska_upload_total');
+    metrics.inc('doska_upload_bytes_total', buf.length);
     // В журнал: сама картинка на доске появится отдельной операцией add, но
     // без этой строки журнал не знал бы, откуда взялся файл.
     record(room, { t: 'img', url: href, bytes: buf.length });
   }
+  if (had) metrics.inc('doska_upload_dedup_total');   // склейка одинаковых
   return reply(res, 200, { url: href, dedup: had });
 }
 
@@ -627,6 +632,16 @@ const server = http.createServer(async (req, res) => {
     const status = e.status && e.status >= 400 && e.status < 600 ? e.status : (e.transport ? 503 : 500);
     if (status >= 500) console.error(req.method, p, e.message);
     return reply(res, status, { error: e.message || 'ошибка сервера' });
+  }
+
+  /* Метрики. Только с самой машины: по ним видно, сколько досок и насколько
+     они живые, — наружу такое не отдают. Сборщик ходит изнутри. */
+  if (p === '/metrics') {
+    const from = req.socket.remoteAddress || '';
+    if (!/^(::1|::ffff:127\.|127\.)/.test(from)) { res.writeHead(403); return res.end(); }
+    res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4; charset=utf-8',
+                         'cache-control': 'no-store' });
+    return res.end(metrics.render({ rooms, clients: wss.clients.size }));
   }
 
   /* --- статика --- */
@@ -949,8 +964,23 @@ wss.on('connection', (ws, req) => {
             name: 'Гость', cap: 'none', color: COLORS[seq % COLORS.length] };
 
   ws.on('message', async raw => {
-    let m; try { m = JSON.parse(raw); } catch { return; }
+    let m; try { m = JSON.parse(raw); } catch { metrics.inc('doska_bad_messages_total'); return; }
+    /* Сколько занял разбор и рассылка одного сообщения. Замер — два вычитания,
+       на рисование не влияет, зато лаги видно раньше, чем их заметит учитель.
+       Курсоры и живой штрих не меряем: их много, а полезного в их задержке
+       ничего — они и так идут мимо всей логики. */
+    const done = (m.t === 'cursor' || m.t === 'live')
+      ? null : metrics.timer('doska_op_seconds', { op: String(m.t || '?').slice(0, 12) });
+    if (done) queueMicrotask(() => {});      // порядок замера не меняем
+    try {
+      await handleMessage(ws, m);
+    } finally {
+      if (done) done();
+      metrics.inc('doska_messages_total', 1, { op: String(m.t || '?').slice(0, 12) });
+    }
+  });
 
+  async function handleMessage(ws, m) {
     if (m.t === 'join') {
       if (ws.room || !okId(String(m.room || ''))) return;
       const id = String(m.room);
@@ -1129,7 +1159,7 @@ wss.on('connection', (ws, req) => {
         broadcast(room, { t: 'cleared' });
         return;
     }
-  });
+  }
 
   ws.on('close', () => {
     const room = ws.room;
