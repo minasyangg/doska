@@ -3192,13 +3192,23 @@ document.getElementById('newBoard').onclick=async()=>{
 async function openSettings(id){
   const board=myBoards.find(b=>b.id===id)||{id,title:document.getElementById('title').textContent,
     guestAccess:'none',objectEditPolicy:'creator'};
+  /* Список учеников есть только у того, кто вошёл под своей учётной записью
+     МЦКО: он берётся из mcko-app под его же правами. Гостю по ссылке брать
+     его неоткуда и незачем — ему остаётся доступ по ссылке. */
+  const withStudents=!!(S.you&&S.you.role==='teacher');
+
   const m=document.createElement('div');
   m.className='modal';
   m.innerHTML='<div class="sheet">'+
     '<h2>Доступ к доске</h2><p id="stTitle"></p>'+
-    '<div class="sub">Участники</div><div id="stList"></div>'+
-    '<div class="row"><select id="stPick" style="flex:1"></select>'+
-    '<button class="mini" id="stAdd" style="background:#fff;color:#15171A">Добавить</button></div>'+
+    (withStudents
+      ? '<div class="sub">Участники</div><div id="stList"></div>'+
+        '<div class="row"><select id="stPick" style="flex:1"></select>'+
+        '<button class="mini" id="stAdd" style="background:#fff;color:#15171A">Добавить</button></div>'
+      : '<div class="sub">Участники</div>'+
+        '<p style="color:#8C9199;font-size:12.5px;margin:0 0 4px">'+
+        'Список учеников доступен после входа через МЦКО. Сейчас доской можно '+
+        'поделиться только ссылкой.</p>')+
     '<div class="sub">Гостевая ссылка</div>'+
     '<div class="row"><select id="stGuest" style="flex:1">'+
       '<option value="none">выключена — только по аккаунту</option>'+
@@ -3210,6 +3220,9 @@ async function openSettings(id){
       '<option value="creator">каждый удаляет только своё</option>'+
       '<option value="anyone">любой участник удаляет любое</option>'+
     '</select></div>'+
+    // Кнопка появляется, только когда есть что применять: пустое «Сохранить»
+    // сбивает с толку — непонятно, сохранилось ли уже.
+    '<button class="btn" id="stSave" hidden>Сохранить</button>'+
     '<button class="btn ghost" id="stClose">Закрыть</button>'+
     '<div class="err" id="stErr"></div></div>';
   document.body.appendChild(m);
@@ -3218,8 +3231,22 @@ async function openSettings(id){
   $('#stTitle').textContent=board.title;
   $('#stGuest').value=board.guestAccess||'none';
   $('#stPolicy').value=board.objectEditPolicy||'creator';
-  $('#stClose').onclick=()=>m.remove();
-  m.onclick=e=>{if(e.target===m)m.remove();};
+
+  /* Что ещё не применено. Раньше каждая правка уходила на сервер сразу, и было
+     не видно, где заканчивается настройка: человек закрывал окно, не зная,
+     сохранилось ли. Теперь правки копятся, а «Сохранить» применяет их разом и
+     перезагружает полотно, чтобы новые права подхватились без F5. */
+  const pending={board:{},add:[],drop:[],access:{}};
+  const dirty=()=>Object.keys(pending.board).length||pending.add.length||
+                  pending.drop.length||Object.keys(pending.access).length;
+  const sync=()=>{$('#stSave').hidden=!dirty();};
+
+  const closeAll=()=>{
+    if(dirty()&&!confirm('Есть несохранённые изменения. Закрыть без сохранения?'))return;
+    m.remove();
+  };
+  $('#stClose').onclick=closeAll;
+  m.onclick=e=>{if(e.target===m)closeAll();};
 
   let students=[],parts=[];
   const drawList=()=>{
@@ -3236,44 +3263,50 @@ async function openSettings(id){
       const sel=document.createElement('select');
       sel.innerHTML='<option value="edit">рисует</option><option value="view">смотрит</option>';
       sel.value=p.access;
-      sel.onchange=async()=>{
-        try{await api('/boards/'+id+'/participants/'+p.id,{method:'PATCH',body:{access:sel.value}});
-            p.access=sel.value;err('');}
-        catch(e){err(e.message);sel.value=p.access;}
-      };
+      sel.onchange=()=>{p.access=sel.value;pending.access[p.id]=sel.value;sync();};
       const x=document.createElement('button');x.className='x';x.textContent='×';x.title='Убрать';
-      x.onclick=async()=>{
-        try{await api('/boards/'+id+'/participants/'+p.id,{method:'DELETE'});
-            parts=parts.filter(q=>q.id!==p.id);drawList();refreshPick();err('');}
-        catch(e){err(e.message);}
+      x.onclick=()=>{
+        // если участника только что добавили и ещё не сохранили — просто
+        // забываем про него, а не шлём удаление того, чего на сервере нет
+        const idx=pending.add.indexOf(p.id);
+        if(idx>=0)pending.add.splice(idx,1); else pending.drop.push(p.id);
+        delete pending.access[p.id];
+        parts=parts.filter(q=>q.id!==p.id);
+        drawList();refreshPick();sync();
       };
       row.append(nm,sel,x);box.appendChild(row);
     }
   };
   const refreshPick=()=>{
+    if(!withStudents)return;
     const has=new Set(parts.map(p=>p.id));
     const free=students.filter(s=>!has.has(s.id));
+    // Пусто по двум разным причинам, и человеку важно понимать, по какой:
+    // либо всех уже добавили, либо учеников за ним вообще нет.
     $('#stPick').innerHTML=free.length
       ? free.map(s=>'<option value="'+s.id+'">'+(s.full_name||s.id)+(s.grade?' · '+s.grade:'')+'</option>').join('')
-      : '<option value="">все ваши ученики уже добавлены</option>';
+      : '<option value="">'+(students.length?'все ваши ученики уже добавлены'
+                                            :'за вами не закреплено ни одного ученика')+'</option>';
     $('#stAdd').disabled=!free.length;
   };
 
   try{
-    const [pr,st]=await Promise.all([api('/boards/'+id+'/participants'),api('/students')]);
-    parts=pr.participants||[];students=st.students||[];
+    const reqs=[api('/boards/'+id+'/participants')];
+    if(withStudents)reqs.push(api('/students'));
+    const [pr,st]=await Promise.all(reqs);
+    parts=pr.participants||[];students=(st&&st.students)||[];
     drawList();refreshPick();
   }catch(e){err('Не удалось загрузить участников: '+e.message);}
 
-  $('#stAdd').onclick=async()=>{
+  if(withStudents)$('#stAdd').onclick=()=>{
     const who=$('#stPick').value;
     if(!who)return;
-    try{
-      await api('/boards/'+id+'/participants',{method:'POST',body:{user_id:who,access:'edit'}});
-      const s=students.find(x=>x.id===who)||{};
-      parts.push({id:who,access:'edit',name:s.full_name});
-      drawList();refreshPick();err('');
-    }catch(e){err(e.message);}
+    const s=students.find(x=>x.id===who)||{};
+    parts.push({id:who,access:'edit',name:s.full_name});
+    // если его же только что убирали — отменяем удаление, а не пишем оба
+    const idx=pending.drop.indexOf(who);
+    if(idx>=0)pending.drop.splice(idx,1); else pending.add.push(who);
+    drawList();refreshPick();sync();err('');
   };
 
   const patch=async(body,onOk)=>{
@@ -3283,8 +3316,39 @@ async function openSettings(id){
         err('');if(onOk)onOk();}
     catch(e){err(e.message);}
   };
-  $('#stGuest').onchange=()=>patch({guest_access:$('#stGuest').value});
-  $('#stPolicy').onchange=()=>patch({object_edit_policy:$('#stPolicy').value});
+  $('#stGuest').onchange=()=>{pending.board.guest_access=$('#stGuest').value;sync();};
+  $('#stPolicy').onchange=()=>{pending.board.object_edit_policy=$('#stPolicy').value;sync();};
+
+  /* Применение разом. Порядок важен: сперва убираем, потом добавляем — иначе
+     повторное добавление того, кого убирали, могло бы упереться в уникальность
+     строки участника. */
+  $('#stSave').onclick=async()=>{
+    const btn=$('#stSave');btn.disabled=true;btn.textContent='Сохраняю…';
+    try{
+      for(const uid of pending.drop)
+        await api('/boards/'+id+'/participants/'+uid,{method:'DELETE'});
+      for(const uid of pending.add)
+        await api('/boards/'+id+'/participants',{method:'POST',body:{user_id:uid,access:'edit'}});
+      for(const uid in pending.access)
+        await api('/boards/'+id+'/participants/'+uid,{method:'PATCH',body:{access:pending.access[uid]}});
+      // напрямую, а не через patch(): тот гасит ошибку внутри себя, и неудача
+      // выглядела бы удачей
+      if(Object.keys(pending.board).length){
+        const d=await api('/boards/'+id,{method:'PATCH',body:pending.board});
+        const b=myBoards.find(x=>x.id===id);
+        if(b&&d.board){b.guestAccess=d.board.guest_access;b.objectEditPolicy=d.board.object_edit_policy;}
+      }
+
+      pending.board={};pending.add=[];pending.drop=[];pending.access={};
+      sync();err('');
+      hint('Изменения сохранены');
+      // Полотно берёт права в момент подключения, поэтому переподключаем его:
+      // сервер пришлёт init с новыми правилами, и менять ничего руками не надо.
+      if(S.boardId===id&&net.ws&&net.ws.readyState===1)net.ws.close(4001,'права изменены');
+      m.remove();
+    }catch(e){err(e.message);}
+    finally{btn.disabled=false;btn.textContent='Сохранить';}
+  };
 
   $('#stCopy').onclick=async()=>{
     if($('#stGuest').value==='none'){err('Сначала включите гостевую ссылку');return;}
