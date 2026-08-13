@@ -13,6 +13,7 @@ const fs   = require('fs');
 const fsp  = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
+const zlib = require('zlib');
 const { WebSocketServer } = require('ws');
 
 const gotrue  = require('./lib/gotrue');
@@ -631,13 +632,52 @@ const server = http.createServer(async (req, res) => {
   fs.readFile(file, (err, buf) => {
     if (err) return fs.readFile(path.join(PUBLIC, 'index.html'), (e2, b2) => {
       if (e2) { res.writeHead(404); return res.end('not found'); }
-      res.writeHead(200, { 'content-type': MIME['.html'] }); res.end(b2);
+      sendStatic(req, res, b2, '.html');
     });
-    res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream',
-                         'cache-control': 'no-cache' });
-    res.end(buf);
+    sendStatic(req, res, buf, path.extname(file));
   });
 });
+
+/* Отдача статики со сжатием.
+
+   Клиент доски — один файл на 165 КБ, и он уходил целиком на каждую загрузку.
+   Для ученика с телефона это несколько секунд ожидания на ровном месте; brotli
+   ужимает его примерно в пять раз.
+
+   Сжатое держим в памяти: файлов немного, они меняются только при выкладке, а
+   так каждый запрос обходится без работы процессора. Ключ кэша — размер и
+   время правки файла: подменился файл — пересжали. */
+const COMPRESSIBLE = new Set(['.html', '.js', '.css', '.json', '.svg']);
+const zipCache = new Map();
+
+function sendStatic(req, res, buf, ext) {
+  const type = MIME[ext] || 'application/octet-stream';
+  const head = { 'content-type': type, 'cache-control': 'no-cache', vary: 'accept-encoding' };
+  const accept = String(req.headers['accept-encoding'] || '');
+  // мелочь сжимать дороже, чем отдать как есть
+  if (!COMPRESSIBLE.has(ext) || buf.length < 1024) {
+    res.writeHead(200, head);
+    return res.end(buf);
+  }
+  const how = /\bbr\b/.test(accept) ? 'br' : /\bgzip\b/.test(accept) ? 'gzip' : null;
+  if (!how) { res.writeHead(200, head); return res.end(buf); }
+
+  const key = how + ':' + ext + ':' + buf.length;
+  const hit = zipCache.get(key);
+  if (hit) {
+    res.writeHead(200, { ...head, 'content-encoding': how });
+    return res.end(hit);
+  }
+  const done = (e, out) => {
+    if (e) { res.writeHead(200, head); return res.end(buf); }
+    zipCache.set(key, out);
+    res.writeHead(200, { ...head, 'content-encoding': how });
+    res.end(out);
+  };
+  if (how === 'br') zlib.brotliCompress(buf, {
+    params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 9 } }, done);
+  else zlib.gzip(buf, { level: 7 }, done);
+}
 
 /* ═══════════════ WebSocket ═══════════════ */
 /* noServer + свой обработчик upgrade: сессию надо достать из куки ДО того,
