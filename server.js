@@ -610,6 +610,10 @@ const server = http.createServer(async (req, res) => {
       if (p === '/api/students') {
         const s = await session.fromRequest(req);
         if (!s || s.kind !== 'user') return reply(res, 401, { error: 'не авторизовано' });
+        // Список нужен учителю, чтобы выбрать участников доски. Ученику он
+        // отдавал его самого — правило «читай своё» иначе и не могло, — а это
+        // бессмысленный ответ на бессмысленный вопрос. Отвечаем прямо.
+        if (s.role !== 'teacher') return reply(res, 403, { error: 'список учеников — для преподавателя' });
         const token = await session.accessToken(s);
         const rows = await db.listMyStudents(token);
         return reply(res, 200, { students: rows });

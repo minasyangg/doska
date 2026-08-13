@@ -1135,6 +1135,29 @@ function flushLive(){
     lctx.fillStyle='#2F80ED';
     lctx.beginPath();lctx.arc(arcDraft.cx,arcDraft.cy,3/S.cam.z,0,6.2832);lctx.fill();
     lctx.restore();
+
+    /* Градусная мера, пока ведут. Показываем сколько развернули от начала —
+       именно это и держат в голове, когда чертят угол. С отрывом пера подпись
+       исчезает вместе с самим наброском: на готовой дуге она была бы мусором. */
+    const deg=Math.abs(arcDraft.a1-arcDraft.a0)*180/Math.PI;
+    const mid=arcPt(arcDraft,(arcDraft.a0+arcDraft.a1)/2);
+    const sp=toScreen(mid.x,mid.y);
+    lctx.setTransform(dpr,0,0,dpr,0,0);
+    const txt=(deg>=360?deg.toFixed(0):deg.toFixed(1))+'°';
+    lctx.font='12px ui-sans-serif,system-ui,sans-serif';
+    const tw=lctx.measureText(txt).width+12;
+    // подпись чуть наружу от дуги, чтобы не перекрывать саму линию
+    const away=Math.hypot(sp.x-toScreen(arcDraft.cx,arcDraft.cy).x,
+                          sp.y-toScreen(arcDraft.cx,arcDraft.cy).y)||1;
+    const c0=toScreen(arcDraft.cx,arcDraft.cy);
+    const bx=sp.x+(sp.x-c0.x)/away*18-tw/2, by=sp.y+(sp.y-c0.y)/away*18-10;
+    lctx.fillStyle='rgba(247,245,240,.96)';lctx.strokeStyle='rgba(26,28,32,.25)';
+    lctx.lineWidth=1;
+    lctx.beginPath();lctx.roundRect(bx,by,tw,20,5);lctx.fill();lctx.stroke();
+    lctx.fillStyle='#1A1C20';lctx.textAlign='center';lctx.textBaseline='middle';
+    lctx.fillText(txt,bx+tw/2,by+10);
+    lctx.textAlign='start';lctx.textBaseline='alphabetic';
+    applyCam(lctx);
   }
   if(shapeDraft){
     const d=shapeDraft;
