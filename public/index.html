@@ -3409,7 +3409,19 @@ document.getElementById('newBoard').onclick=async()=>{
 /* Лист настроек: участники, гостевая ссылка, правило удаления объектов.
    Всё, что здесь меняется, проверяется ещё раз на сервере и в RLS. */
 async function openSettings(id){
-  const board=myBoards.find(b=>b.id===id)||{id,title:document.getElementById('title').textContent,
+  /* Настройки берём с сервера, а не из списка досок.
+
+     Раньше брали из myBoards — но он наполняется только на странице списка.
+     Открытое из самой доски окно всегда показывало значения по умолчанию:
+     «гостевая ссылка выключена», даже если она включена. Выглядело так, будто
+     настройка не сохранилась, хотя на сервере она стояла. */
+  let board=myBoards.find(b=>b.id===id)||null;
+  try{
+    const d=await api('/boards/'+id);
+    if(d&&d.board)board={id,title:d.board.title,
+      guestAccess:d.board.guest_access,objectEditPolicy:d.board.object_edit_policy};
+  }catch{ /* не ответил — покажем что есть, но об этом скажем ниже */ }
+  if(!board)board={id,title:document.getElementById('title').textContent,
     guestAccess:'none',objectEditPolicy:'creator'};
   /* Список учеников есть только у того, кто вошёл под своей учётной записью
      МЦКО: он берётся из mcko-app под его же правами. Гостю по ссылке брать
