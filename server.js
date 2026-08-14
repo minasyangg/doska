@@ -86,8 +86,17 @@ async function loadRoom(id) {
     ownerId: saved.ownerId || null,
     locked: !!saved.locked,
     anyEdit: !!saved.anyEdit,
-    clients: new Set(), touched: Date.now()
+    clients: new Set(), touched: Date.now(),
+    /* Указатель «идентификатор → объект».
+
+       Без него каждое действие искало объект перебором всего содержимого:
+       перенос — по разу, возврат стёртого — по разу на каждый из восьмисот
+       объектов. На занятии с 4500 объектами это вылилось в миллионы сравнений
+       и задержку до 2.5 секунды — её и показал мониторинг. Теперь поиск
+       мгновенный, а порядок слоёв по-прежнему держит сам массив. */
+    byId: new Map()
   };
+  for (const it of r.items) r.byId.set(it.id, it);
 
   // До v4 поле by хранило идентификатор СОКЕТА, а не человека: после
   // переподключения автор терял права на собственные штрихи. Новых владельцев
@@ -1028,7 +1037,7 @@ wss.on('connection', (ws, req) => {
         if (!mayEdit) return;
         const src = m.item || {};
         const it = pick(src.type)(src, ws.me.uid);
-        if (!it || room.items.some(x => x.id === it.id)) return;
+        if (!it || room.byId.has(it.id)) return;
 
         // Потолок объектов. Раньше при переполнении молча выбрасывались две
         // тысячи самых старых — то есть начало занятия исчезало, и человек
@@ -1039,6 +1048,7 @@ wss.on('connection', (ws, req) => {
           return;
         }
         room.items.push(it);
+        room.byId.set(it.id, it);
         const sent = pt.wire(it);
         record(room, { t: 'add', item: sent });
         broadcast(room, { t: 'add', item: sent }, ws);
@@ -1047,7 +1057,7 @@ wss.on('connection', (ws, req) => {
 
       case 'move': {
         if (!mayEdit) return;
-        const it = room.items.find(x => x.id === m.id);
+        const it = room.byId.get(m.id);
         if (!it || !mine(it)) return;
         const allowed = PATCHABLE[it.type];
         if (!allowed) return;
@@ -1079,6 +1089,7 @@ wss.on('connection', (ws, req) => {
           gone.push(it.id); return false;
         });
         if (!gone.length) return;
+        for (const id of gone) room.byId.delete(id);
         record(room, { t: 'erase', ids: gone });
         broadcast(room, { t: 'erase', ids: gone }, ws);
         return;
@@ -1090,7 +1101,7 @@ wss.on('connection', (ws, req) => {
         for (const src of m.items.slice(0, 800)) {
           if (room.items.length >= MAX_ITEMS) { send(ws, { t: 'full', max: MAX_ITEMS }); break; }
           const it = pick(src.type)(src, ws.me.uid);
-          if (it && !room.items.some(x => x.id === it.id)) { room.items.push(it); back.push(it); }
+          if (it && !room.byId.has(it.id)) { room.items.push(it); room.byId.set(it.id, it); back.push(it); }
         }
         if (!back.length) return;
         const sentBack = back.map(i => pt.wire(i));
@@ -1155,6 +1166,7 @@ wss.on('connection', (ws, req) => {
       case 'clear':
         if (!owner) return;
         room.items = [];
+        room.byId.clear();
         record(room, { t: 'clear' });
         broadcast(room, { t: 'cleared' });
         return;

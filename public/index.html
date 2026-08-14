@@ -23,10 +23,41 @@
   .dock{position:fixed;left:14px;top:50%;transform:translateY(-50%);background:var(--panel);
     border:1px solid var(--edge);border-radius:var(--r);padding:8px;display:flex;flex-direction:column;
     gap:6px;box-shadow:0 14px 40px rgba(15,17,20,.28);z-index:10;user-select:none;
-    max-height:calc(100vh - 24px);overflow-y:auto;scrollbar-width:none}
+    max-height:calc(100vh - 24px);overflow-y:auto;scrollbar-width:none;
+    transition:transform .22s cubic-bezier(.2,.8,.2,1)}
   .dock::-webkit-scrollbar{display:none}
+  /* Спрятанная панель уезжает за край, оставляя узкий язычок. Наводишь на
+     него — выезжает обратно; так же убирают в сторону видео на телефоне.
+     Пока в панели работают (открыт список фигур, тянут ползунок) — держим
+     её на месте: уезжающая из-под руки панель раздражает сильнее, чем
+     занятое место. */
+  .dock.away{transform:translateY(-50%) translateX(calc(-100% - 10px))}
+  .dock.away:hover,.dock.away:focus-within,.dock.away.peek{transform:translateY(-50%) translateX(0)}
+  /* язычок: узкая полоса у самого края, за неё панель и возвращают */
+  .edge{position:fixed;left:0;top:50%;transform:translateY(-50%);width:14px;height:132px;
+    z-index:9;border-radius:0 10px 10px 0;background:var(--panel);opacity:.55;
+    display:none;place-items:center;cursor:pointer;border:1px solid var(--edge);border-left:0}
+  .edge.show{display:grid}
+  .edge:hover{opacity:1;width:18px}
+  .edge::after{content:'';width:3px;height:34px;border-radius:2px;background:var(--muted)}
+  /* кнопка «закрепить/убрать» — первая в панели, чтобы её было легко найти */
+  .tool.pin{color:var(--muted)}
+  .tool.pin.off{color:var(--text)}
   .tool{width:42px;height:42px;border:0;border-radius:10px;background:transparent;color:var(--muted);
     display:grid;place-items:center;cursor:pointer;transition:background .13s,color .13s}
+  /* На невысоком экране кнопки ужимаются, чтобы влезли все: планшет лёжа —
+     это 820 точек по высоте, и панель со всеми инструментами упиралась в край. */
+  @media (max-height:900px){
+    .dock{padding:6px;gap:4px}
+    .tool{width:36px;height:36px}
+    .tool svg{width:19px;height:19px}
+    .sep{margin:2px 4px}
+  }
+  @media (max-height:720px){
+    .dock{padding:5px;gap:3px}
+    .tool{width:32px;height:32px}
+    .tool svg{width:17px;height:17px}
+  }
   .tool:hover{background:var(--panel-2);color:var(--text)}
   .tool.on{background:var(--accent);color:#fff}
   .tool[disabled]{opacity:.3;cursor:default}
@@ -254,7 +285,13 @@
   <canvas id="live"  class="layer"></canvas>
 </div>
 
+<div class="edge" id="dockEdge" title="Показать инструменты"></div>
+
 <aside class="dock hidden" id="dock">
+  <button class="tool pin" id="dockPin" title="Открепить панель — будет прятаться у края">
+    <svg viewBox="0 0 24 24"><path d="M15 3l6 6-3 1-4 4-1 5-6-6 5-1 4-4z"/><path d="M7 17l-4 4"/></svg>
+  </button>
+  <div class="sep"></div>
   <button class="tool on" data-tool="pen" title="Карандаш (1) · правая кнопка — настройки"><svg viewBox="0 0 24 24"><path d="M4 20l4-1 10-10a2.5 2.5 0 0 0-3.5-3.5L4.5 15.5 4 20z"/><path d="M13.5 6.5l4 4"/></svg></button>
   <button class="tool" data-tool="marker" title="Маркер (2) · правая кнопка — настройки"><svg viewBox="0 0 24 24"><path d="M9 15l-3 3v2h4l3-3"/><path d="M12 17L7 12l8-8a2.8 2.8 0 0 1 4 4l-7 9z"/></svg></button>
   <button class="tool" data-tool="eraser" title="Ластик (3)"><svg viewBox="0 0 24 24"><path d="M8 20h12"/><path d="M15.5 4.5l4 4a2 2 0 0 1 0 2.8L12 19H8l-3.5-3.5a2 2 0 0 1 0-2.8l8.2-8.2a2 2 0 0 1 2.8 0z"/></svg></button>
@@ -439,6 +476,8 @@ const GRID_NAMES={grid:'клетка',dots:'точки',lines:'линейка',n
 
 const S={tool:'pen',size:4,color:PENS[0],penColor:PENS[0],markerColor:MARKERS[0],
   cam:{x:0,y:0,z:1},grid:store.get('doska.grid')||'grid',
+  // панель инструментов: закреплена или прячется у края
+  dockPinned:store.get('doska.dockPinned')!=='0',
   // насколько скорость руки меняет толщину линии: 1 — как было всегда, 0 — ровная
   sens:(()=>{const v=parseFloat(store.get('doska.sens'));return Number.isFinite(v)?Math.min(1,Math.max(0,v)):1;})(),
   // насколько точно линия идёт за указателем: 1 — след в след, ниже — мягче
@@ -1124,7 +1163,7 @@ function flushLive(){
     // Ножка циркуля и сама дуга, пока её обводят.
     paintArc(lctx,{cx:arcDraft.cx,cy:arcDraft.cy,r:arcDraft.r,
                    a0:arcDraft.a0,a1:arcDraft.a1,
-                   color:S.color,size:S.size/S.cam.z,dash:S.dash});
+                   color:S.color,size:S.size,dash:S.dash});
     lctx.save();
     lctx.strokeStyle='rgba(47,128,237,.5)';lctx.lineWidth=1/S.cam.z;
     lctx.setLineDash([4/S.cam.z,4/S.cam.z]);
@@ -1164,7 +1203,7 @@ function flushLive(){
     const x0=Math.min(d.a.x,d.b.x), y0=Math.min(d.a.y,d.b.y);
     const w0=Math.abs(d.b.x-d.a.x), h0=Math.abs(d.b.y-d.a.y);
     paintShape(lctx,{kind:d.kind,x:x0,y:y0,w:w0,h:h0,rot:0,
-                     color:S.color,size:S.size/S.cam.z,dash:S.dash,fill:S.fill});
+                     color:S.color,size:S.size,dash:S.dash,fill:S.fill});
   }
   if(pathDraft){
     const d=pathDraft;
@@ -1172,7 +1211,7 @@ function flushLive(){
     if(d.mode==='vertex'&&d.live)pts=pts.concat([d.live]);
     if(pts.length>=2){
       paintPath(lctx,{kind:d.kind,pts,closed:false,
-        color:S.color,size:S.size/S.cam.z,dash:S.dash,fill:d.kind==='polygon'?S.fill:null,
+        color:S.color,size:S.size,dash:S.dash,fill:d.kind==='polygon'?S.fill:null,
         a1:S.a1||0,a2:S.a2||0});
     }
     if(d.mode==='vertex'){
@@ -1855,8 +1894,19 @@ stage.addEventListener('pointerdown',e=>{
 
   if(S.tool==='eraser'){erasing=true;eraseAt(pt);return;}
 
+  /* Толщина хранится в единицах доски, а не экрана.
+
+     Раньше писали S.size/S.cam.z: линия выглядела одинаково в момент
+     рисования, но на доске оставалась разной. Замер это подтвердил: при
+     настройке «4» на увеличении 100% сохранялось 4, на 51% — 7.8, на 17% —
+     23.8. Две линии с одной и той же настройкой отличались в шесть раз, и
+     это было видно, стоило вернуться к обычному увеличению.
+
+     Теперь «4» — это всегда 4 на доске, как чернила на бумаге: приближение
+     просто увеличивает написанное. Расплата честная: рисуя сильно отдалённым,
+     линию видно тонкой — потому что она и есть маленькая для этой доски. */
   drawId=e.pointerId;
-  current=mkStroke(S.tool,S.color,S.size/S.cam.z,newId(),S.me&&S.me.id);
+  current=mkStroke(S.tool,S.color,S.size,newId(),S.me&&S.me.id);
   pressure=(e.pointerType==='pen'&&e.pressure>0)?e.pressure:0.42;
   lastPt=pt;lastT=performance.now();
   pushPoint(current,w.x,w.y,pressure);
@@ -2134,7 +2184,7 @@ function endPointer(e){
     if(d.a0!==null&&d.r*S.cam.z>=6&&Math.abs(d.a1-d.a0)*d.r*S.cam.z>=4){
       const it={id:newId(),by:S.me&&S.me.id,type:'arc',
                 cx:d.cx,cy:d.cy,r:d.r,a0:d.a0,a1:d.a1,
-                color:S.color,size:S.size/S.cam.z,dash:S.dash,
+                color:S.color,size:S.size,dash:S.dash,
                 g:null,locked:false,bbox:null};
       addItem(it);
       pushUndo([{type:'add',item:it}]);
@@ -2149,7 +2199,7 @@ function endPointer(e){
     if(Math.max(w0,h0)*S.cam.z>=3){
       const it={id:newId(),by:S.me&&S.me.id,type:'shape',kind:d.kind,
                 x:x0,y:y0,w:Math.max(0.5,w0),h:Math.max(0.5,h0),rot:0,
-                color:S.color,size:S.size/S.cam.z,dash:S.dash,fill:S.fill,locked:false};
+                color:S.color,size:S.size,dash:S.dash,fill:S.fill,locked:false};
       addItem(it);
       undoStack.push({type:'add',item:it});redoStack.length=0;
       net.send({t:'add',item:deflate(it)});
@@ -2315,7 +2365,7 @@ function closeTextEditor(save){
 function commitPath(kind,pts){
   const it={id:newId(),by:S.me&&S.me.id,type:'path',kind,
             pts:pts.map(p=>({x:p.x,y:p.y})),closed:kind==='polygon',
-            color:S.color,size:S.size/S.cam.z,dash:S.dash,
+            color:S.color,size:S.size,dash:S.dash,
             fill:kind==='polygon'?S.fill:null,
             a1:S.a1||0,a2:S.a2||0,locked:false,bbox:null};
   addItem(it);
@@ -2870,6 +2920,34 @@ document.getElementById('wipe').onclick=()=>{
   if(S.cap!=='owner')return;
   if(confirm('Очистить доску у всех участников? Это нельзя отменить.'))net.send({t:'clear'});
 };
+/* ═══════════════════ панель: закрепить или прятать ═══════════════════
+   Закреплённая всегда на месте — так привычнее на большом экране. Открепишь,
+   и она уезжает за край, оставляя язычок: наводишь — выезжает обратно. На
+   планшете это возвращает половину полезной ширины.
+
+   Выбор запоминается в браузере: это привычка человека, а не свойство доски. */
+const dockEl=document.getElementById('dock'), dockEdge=document.getElementById('dockEdge');
+function applyDockPinned(){
+  const pinned=S.dockPinned;
+  dockEl.classList.toggle('away',!pinned);
+  dockEdge.classList.toggle('show',!pinned);
+  const b=document.getElementById('dockPin');
+  b.classList.toggle('off',!pinned);
+  b.title=pinned?'Открепить панель — будет прятаться у края':'Закрепить панель на экране';
+}
+document.getElementById('dockPin').onclick=()=>{
+  S.dockPinned=!S.dockPinned;
+  store.set('doska.dockPinned',S.dockPinned?'1':'0');
+  applyDockPinned();
+  hint(S.dockPinned?'Панель закреплена':'Панель прячется — наведите на левый край');
+};
+// язычок: наводим — панель выезжает и остаётся, пока с неё не уйдут
+dockEdge.addEventListener('pointerenter',()=>dockEl.classList.add('peek'));
+dockEl.addEventListener('pointerleave',()=>dockEl.classList.remove('peek'));
+dockEdge.addEventListener('click',()=>{
+  S.dockPinned=true;store.set('doska.dockPinned','1');applyDockPinned();
+});
+
 document.getElementById('callAll').onclick=()=>{
   if(S.cap!=='owner')return;
   net.send({t:'callAll',cam:{x:S.cam.x,y:S.cam.y,z:S.cam.z},w:board.clientWidth});
