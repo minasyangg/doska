@@ -252,31 +252,56 @@
   .sheet .btn.ghost{background:transparent;color:var(--muted);font-weight:500;margin-top:6px}
   .err{color:#E4796F;font-size:12.5px;min-height:17px}
 
-  @media (max-width:700px){
+  /* Полоса снизу нужна не только узким экранам, но и низким: телефон лёжа
+     шире семисот точек, а по высоте там всего 390 — столбец не помещается тем
+     более. */
+  @media (max-width:700px), (max-height:520px){
     /* Верхняя панель остаётся справа. Прежняя строка прибивала её к левому
        краю — наследство тех времён, когда панель стояла по центру. Вместе с
        right:14px это растягивало её на всю ширину, и она ложилась прямо на
        инструменты, закрывая маркер. */
     .top{left:auto;right:8px;top:8px;max-width:calc(100vw - 16px)}
     #title{max-width:38vw}
-    /* Инструменты уводим ниже панели и прижимаем к верху, а не к середине:
-       на телефоне столбец длинный, и по центру он упирается в оба края. */
-    .dock{left:8px;top:64px;transform:none;padding:5px;gap:3px;
-          max-height:calc(100vh - 132px)}
-    .dock.away{transform:translateX(calc(-100% - 10px))}
-    .dock.away:hover,.dock.away:focus-within,.dock.away.peek{transform:translateX(0)}
-    .edge{top:64px;transform:none;height:112px}
-    .tool{width:34px;height:34px}
-    .tool svg{width:18px;height:18px}
-    .pen{left:52px;width:164px}.hint{display:none}
+    /* Инструменты — горизонтальной полосой снизу.
+
+       Столбцом они не помещались: шестнадцать кнопок в высоту телефона не
+       влезают, и приходилось прокручивать панель. Внизу же ширины хватает, а
+       если нет — полоса прокручивается вбок, что для пальца привычнее, и рука
+       не закрывает написанное, как при столбце сбоку. */
+    .dock{left:8px;right:8px;bottom:calc(8px + env(safe-area-inset-bottom));
+          top:auto;transform:none;flex-direction:row;align-items:center;
+          padding:5px;gap:3px;max-height:none;max-width:none;
+          overflow-x:auto;overflow-y:hidden;justify-content:flex-start}
+    .dock.away{transform:translateY(calc(100% + 14px))}
+    .dock.away:hover,.dock.away:focus-within,.dock.away.peek{transform:translateY(0)}
+    /* разделители в строке становятся вертикальными */
+    .sep{width:1px;height:22px;margin:0 3px;flex:none}
+    /* язычок переезжает вниз по центру */
+    .edge{left:50%;right:auto;top:auto;bottom:0;transform:translateX(-50%);
+          width:112px;height:14px;border-radius:10px 10px 0 0;
+          border:1px solid var(--edge);border-bottom:0}
+    .edge:hover{height:18px;width:112px}
+    .edge::after{width:34px;height:3px}
+    .tool{width:38px;height:38px}
+    .tool svg{width:19px;height:19px}
+    /* всё, что раскрывается из панели, открывается вверх, а не вбок */
+    .subtools{left:8px;right:8px;top:auto;bottom:60px;transform:none;width:auto;
+              flex-direction:row;flex-wrap:wrap;max-height:44vh;
+              overflow-y:auto;justify-content:center}
+    .subtools .head{width:100%}
+    .pen{left:8px;right:8px;top:auto;bottom:60px;transform:none;width:auto;
+         max-height:52vh;overflow-y:auto}
+    .hint{display:none}
     .wrap{padding:26px 16px 70px}
-    /* масштаб — мельче и компактнее: он справочный, а не главный */
-    .zoombar{right:8px;bottom:8px}
+    /* масштаб уходит наверх, чтобы не спорить с полосой инструментов */
+    .zoombar{right:8px;bottom:auto;top:56px}
     .zoombar .card{padding:3px}
     /* Мельче тридцати точек не делаем даже ради компактности: в такую кнопку
        пальцем не попасть. Ужимаем только подпись и отступы. */
     .zoombar .mini{height:30px;min-width:30px;padding:0 6px;font-size:11px}
     #zoom{font-size:11px;min-width:38px}
+    /* панель над выделением не должна нырять под полосу инструментов */
+    .selbar{max-width:calc(100vw - 16px)}
   }
   @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -3048,7 +3073,7 @@ document.getElementById('dockPin').onclick=()=>{
 /* «Тесный экран» определяем по ширине, а не по наличию наведения: наведение
    врут и планшеты с мышью, и встроенные браузеры, а ширина не врёт. Именно она
    и решает, мешает панель или нет. */
-const narrowScreen=()=>innerWidth<=700;
+const narrowScreen=()=>innerWidth<=700||innerHeight<=520;
 const touchOnly=narrowScreen()||matchMedia('(hover:none)').matches;
 dockEdge.addEventListener('pointerenter',e=>{
   if(e.pointerType!=='touch')dockEl.classList.add('peek');
