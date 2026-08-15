@@ -319,10 +319,12 @@ async function handleGuestEnter(req, res) {
   const boardId = str(b.board, 40);
   const token = str(b.g, 64);
   const name = str(b.name, 24);
-  if (!okId(boardId) || !token) return reply(res, 400, { error: 'плохая ссылка' });
+  if (!okId(boardId)) return reply(res, 400, { error: 'плохая ссылка' });
 
+  // С токеном — по старой выданной ссылке; без токена — по самому адресу
+  // доски, если владелец включил гостевой доступ.
   let row;
-  try { row = await db.guestOpen(boardId, token); }
+  try { row = token ? await db.guestOpen(boardId, token) : await db.guestOpenByLink(boardId); }
   catch (e) { return reply(res, e.transport ? 503 : 400, { error: e.message }); }
   if (!row) return reply(res, 403, { error: 'ссылка недействительна' });
 

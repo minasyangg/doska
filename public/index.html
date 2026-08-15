@@ -187,22 +187,39 @@
   .dhead{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
   .dhead h1{margin:0;font-size:26px;font-weight:650;letter-spacing:-.015em}
   .dhead .sub{color:#7A7368;font-size:13px}
+  /* кто вошёл — прижат к правому краю строки с названием */
+  .dhead .who{margin-left:auto;align-self:center}
   .drow{display:flex;gap:10px;margin:22px 0 26px;flex-wrap:wrap}
   .btn{border:0;border-radius:10px;padding:11px 16px;font-size:14px;font-weight:600;cursor:pointer;
        background:#1A1C20;color:#fff}
   .btn.sec{background:#E7E2D8;color:#1A1C20;font-weight:500}
   .btn:hover{opacity:.9}
   .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(248px,1fr))}
+  /* Высота под содержимое: кнопок внизу больше нет, и прежние 120 точек
+     оставляли пустой низ. */
   .bcard{background:#fff;border:1px solid #E2DCCF;border-radius:14px;padding:15px;display:flex;
-         flex-direction:column;gap:4px;min-height:120px;position:relative}
+         flex-direction:column;gap:4px;min-height:74px;position:relative}
   .bcard h3{margin:0;font-size:15px;font-weight:600;line-height:1.3;word-break:break-word}
   .bcard .when{color:#8A8378;font-size:11.5px;font-family:ui-monospace,Menlo,monospace}
-  .bacts{display:flex;gap:5px;margin-top:auto;padding-top:12px;flex-wrap:wrap}
-  .card-act{border:1px solid #E2DCCF;background:#FBFAF7;color:#4A463F;border-radius:8px;
-            padding:6px 9px;font-size:12px;cursor:pointer}
-  .card-act:hover{background:#F2EEE5}
-  .card-act.go{background:#1A1C20;color:#fff;border-color:#1A1C20}
-  .card-act.del:hover{background:#FBE9E7;color:#A5342B;border-color:#F0CFC9}
+  /* Карточка целиком нажимаемая: наводишь — приподнимается, нажимаешь —
+     вдавливается и темнеет. Значки в углу живут своей жизнью и клик по ним
+     до карточки не доходит. */
+  .bcard.open{cursor:pointer;transition:transform .12s,box-shadow .12s,background .12s}
+  .bcard.open:hover{box-shadow:0 6px 18px rgba(26,28,32,.10);border-color:#D3CBB9}
+  .bcard.open:active{transform:translateY(1px);background:#F2EEE5}
+  .bcard.open:focus-visible{outline:2px solid #7AA2FF;outline-offset:2px}
+  .cardtools{position:absolute;top:10px;right:10px;display:flex;gap:2px;opacity:.45;
+             transition:opacity .12s}
+  .bcard:hover .cardtools,.bcard:focus-within .cardtools{opacity:1}
+  .cardtool{width:30px;height:30px;border:0;background:transparent;color:#6B655B;
+            border-radius:8px;display:grid;place-items:center;cursor:pointer}
+  .cardtool svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;
+                stroke-linecap:round;stroke-linejoin:round}
+  .cardtool:hover{background:#F2EEE5;color:#1A1C20}
+  .cardtool.del:hover{background:#FBE9E7;color:#A5342B}
+  .cardtool.done{color:#2E6B47}
+  /* заголовку нужно место под значками, иначе длинное название под них лезет */
+  .bcard h3{padding-right:104px}
   .empty{border:1.5px dashed #DCD5C6;border-radius:14px;padding:34px;text-align:center;color:#7A7368;font-size:13.5px;line-height:1.6}
   .note{margin-top:34px;padding:16px 18px;background:#F1EDE3;border-radius:12px;color:#5C564C;
         font-size:12.5px;line-height:1.65}
@@ -236,13 +253,15 @@
 <!-- ═══════════ СПИСОК ДОСОК ═══════════ -->
 <section id="dash">
   <div class="wrap">
+    <!-- Кто вошёл — в правом верхнем углу: там его ищут глазами, а рядом с
+         «Новой доской» он мешал главному действию. -->
     <div class="dhead">
       <h1>Мои доски</h1>
       <span class="sub" id="dashSub"></span>
+      <div class="who" id="who"></div>
     </div>
     <div class="drow">
       <button class="btn" id="newBoard">Новая доска</button>
-      <div class="who" id="who"></div>
     </div>
     <div class="grid" id="boardGrid"></div>
     <div class="note" id="dashNote">
@@ -3418,27 +3437,43 @@ async function loadBoards(){
   renderBoards();
 }
 
+/* Карточка доски целиком нажимаемая: по ней и щёлкают, чтобы открыть. Кнопка
+   «Открыть» была лишней — карточка и есть кнопка. Ссылка и удаление ушли
+   значками в правый верхний угол: это редкие действия, они не должны спорить
+   с главным. */
+const ICON_LINK='<svg viewBox="0 0 24 24"><path d="M10.5 13.5a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1.5 1.5"/><path d="M13.5 10.5a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.5-1.5"/></svg>';
+const ICON_TRASH='<svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg>';
+const ICON_GEAR='<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.2M12 18.8V21M21 12h-2.2M5.2 12H3M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6M18.4 18.4l-1.6-1.6M7.2 7.2L5.6 5.6"/></svg>';
+
 function boardCard(b){
   const el=document.createElement('div');
-  el.className='bcard';
-  el.innerHTML='<h3></h3><div class="when"></div><div class="bacts"></div>';
+  el.className='bcard open';
+  el.tabIndex=0;
+  el.title='Открыть доску';
+  el.innerHTML='<h3></h3><div class="when"></div><div class="cardtools"></div>';
   el.querySelector('h3').textContent=b.title;
   el.querySelector('.when').textContent=
     (b.mine?'':'ведёт '+(b.ownerName||'преподаватель')+' · ')+'изменена '+when(b.updated||b.created);
-  const acts=el.querySelector('.bacts');
-  const add=(cls,text,fn)=>{
-    const x=document.createElement('button');x.className='card-act '+cls;x.textContent=text;
-    x.onclick=fn;acts.appendChild(x);return x;
+
+  const open=()=>nav('/board/'+b.id);
+  el.onclick=e=>{ if(!e.target.closest('.cardtool'))open(); };
+  el.onkeydown=e=>{ if(e.key==='Enter'||e.key===' '){e.preventDefault();open();} };
+
+  const tools=el.querySelector('.cardtools');
+  const tool=(cls,icon,title,fn)=>{
+    const x=document.createElement('button');
+    x.className='cardtool '+cls;x.innerHTML=icon;x.title=title;
+    x.onclick=e=>{e.stopPropagation();fn(x);};
+    tools.appendChild(x);return x;
   };
-  add('go','Открыть',()=>nav('/board/'+b.id));
-  add('link','Ссылка',ev=>{
+  tool('',ICON_LINK,'Скопировать ссылку',x=>{
     copyLink(b.id,'Ссылка на доску');
-    ev.target.textContent='Скопировано';
-    setTimeout(()=>{ev.target.textContent='Ссылка';},1600);
+    x.classList.add('done');
+    setTimeout(()=>x.classList.remove('done'),1400);
   });
   if(b.mine){
-    add('','Доступ',()=>openSettings(b.id));
-    add('del','Удалить',async()=>{
+    tool('',ICON_GEAR,'Доступ к доске',()=>openSettings(b.id));
+    tool('del',ICON_TRASH,'Удалить доску',async()=>{
       if(!confirm('Удалить доску «'+b.title+'» вместе со всем содержимым?'))return;
       try{ await api('/boards/'+b.id,{method:'DELETE'});
            myBoards=myBoards.filter(x=>x.id!==b.id);renderBoards(); }
@@ -3838,6 +3873,17 @@ async function route(){
       // оттуда, а не будем спрашивать пароль второй раз
       const r=await mckoEnter(id);
       if(r==='go')return;
+
+      /* Гостевой доступ включён — пускаем прямо по этой ссылке, спросив только
+         имя. Раньше отсюда уводило на вход всегда, и включённая настройка
+         ничего не меняла: пропуском был отдельный токен, который выпускался
+         лишь кнопкой «Копировать». Теперь пропуск — сам адрес доски. */
+      if(!S.name)await askName();
+      try{
+        await api('/guest/enter',{method:'POST',body:{board:id,name:S.name,guestId:guestId()}});
+        return openBoard(id);
+      }catch{ /* гостей не пускают — значит по паролю */ }
+
       nav('/login?next='+encodeURIComponent('/board/'+id)+(r==='loop'?'&e=sso':''));
       return;
     }
