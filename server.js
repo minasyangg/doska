@@ -619,6 +619,22 @@ const server = http.createServer(async (req, res) => {
       if (p === '/api/config')         return reply(res, 200, { mcko: MCKO_URL || null });
       if (p.startsWith('/api/auth/'))  return await handleAuth(req, res, url, p);
       if (p === '/api/sso/ticket')     return await handleSso(req, res, url, p);
+      /* Пускает ли доска без учётной записи. Спрашивают до всякого входа:
+         иначе человека без аккаунта уводило на страницу МЦКО, и обратно он уже
+         не возвращался. Отдаём только уровень для гостей и название — больше о
+         доске отсюда узнать нельзя, а сама функция в БД молчит про доски, где
+         гостевой доступ выключен. */
+      if (p === '/api/board-entry') {
+        const bid = url.searchParams.get('b') || '';
+        if (!okId(bid)) return reply(res, 400, { error: 'плохой id' });
+        let row = null;
+        try { row = await db.guestOpenByLink(bid); }
+        catch (e) { return reply(res, e.transport ? 503 : 400, { error: e.message }); }
+        return reply(res, 200, row
+          ? { guest: row.access, title: row.title }
+          : { guest: 'none' });
+      }
+
       if (p === '/api/guest/enter')    return await handleGuestEnter(req, res);
       if (p === '/api/upload')         return await handleUpload(req, res, url);
       if (p.startsWith('/api/boards')) return await handleBoards(req, res, url, p);

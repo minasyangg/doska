@@ -471,9 +471,17 @@ async function api(path,{method='GET',body}={}){
 /* Стабильный идентификатор гостя — на нём держится «стереть своё» у того,
    у кого нет аккаунта. Живёт в localStorage, потому что должен переживать
    закрытие вкладки: иначе после перезахода гость теряет свои же штрихи. */
+/* Свой постоянный номер гостя: по нему сервер узнаёт того же человека, если он
+   перезашёл. Раньше здесь звалась rnd() — она живёт на сервере, и в браузере
+   этой строки просто не существовало. Вылезало только у гостя: у вошедших
+   номер берётся из учётной записи, и до сюда дело не доходило. */
 function guestId(){
   let g=store.get('doska.guest');
-  if(!g||!/^[A-Za-z0-9_-]{8,32}$/.test(g)){g=rnd(16);store.set('doska.guest',g);}
+  if(!g||!/^[A-Za-z0-9_-]{8,32}$/.test(g)){
+    const a=new Uint8Array(12);crypto.getRandomValues(a);
+    g=btoa(String.fromCharCode(...a)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+    store.set('doska.guest',g);
+  }
   return g;
 }
 
@@ -1300,15 +1308,46 @@ function flushLive(){
     lctx.textAlign='start';lctx.textBaseline='alphabetic';
   }
 
-  // группа: у каждого объекта своя тонкая рамка, у всей группы — общая.
-  // Ручек нет намеренно: поворот и растяжение группы — отдельная история,
-  // а перенос, копия, замок и удаление работают и без них.
+  /* Группа: одна общая рамка, а сами объекты подсвечены.
+
+     Раньше у каждого объекта была своя рамка, и выделенный десяток штрихов
+     превращался в решётку из прямоугольников — за ней не видно самих записей.
+     Теперь объекты обводятся по собственному контуру мягким ореолом: сразу
+     понятно, что именно взято, и написанное остаётся читаемым.
+
+     Ручек у группы нет намеренно: поворот и растяжение группы — отдельная
+     история, а перенос, копия, замок и удаление работают и без них. */
   if(selection.length>1){
-    lctx.strokeStyle='rgba(47,128,237,.55)';lctx.lineWidth=1;lctx.setLineDash([3,3]);
+    lctx.save();
+    lctx.setTransform(dpr,0,0,dpr,0,0);
+    applyCam(lctx);
+    lctx.strokeStyle='rgba(47,128,237,.38)';
+    lctx.lineJoin='round';lctx.lineCap='round';
     for(const it of selection){
-      const b=bboxOf(it),p0=toScreen(b.x0,b.y0);
-      lctx.strokeRect(p0.x,p0.y,(b.x1-b.x0)*S.cam.z,(b.y1-b.y0)*S.cam.z);
+      const halo=(it.size||2)+10/S.cam.z;      // ореол шире самой линии
+      lctx.lineWidth=halo;
+      if(BOX_TYPES.has(it.type)){
+        const rot=it.rot||0, cx=it.x+it.w/2, cy=it.y+it.h/2;
+        lctx.save();
+        if(rot){lctx.translate(cx,cy);lctx.rotate(rot);lctx.translate(-cx,-cy);}
+        lctx.lineWidth=6/S.cam.z;
+        lctx.strokeRect(it.x,it.y,it.w,it.h||0);
+        lctx.restore();
+      }else if(ARC_TYPES.has(it.type)){
+        lctx.beginPath();
+        lctx.arc(it.cx,it.cy,it.r,it.a0,it.a0+arcSweep(it));
+        lctx.stroke();
+      }else if(Array.isArray(it.pts)&&it.pts.length){
+        lctx.beginPath();
+        lctx.moveTo(it.pts[0].x,it.pts[0].y);
+        for(let i=1;i<it.pts.length;i++)lctx.lineTo(it.pts[i].x,it.pts[i].y);
+        if(it.closed)lctx.closePath();
+        lctx.stroke();
+      }
     }
+    lctx.restore();
+    lctx.setTransform(dpr,0,0,dpr,0,0);
+
     const g=selectionBox(),gp=toScreen(g.x0,g.y0);
     lctx.strokeStyle='#2F80ED';lctx.lineWidth=1.5;lctx.setLineDash([6,4]);
     lctx.strokeRect(gp.x-4,gp.y-4,(g.x1-g.x0)*S.cam.z+8,(g.y1-g.y0)*S.cam.z+8);
@@ -3775,6 +3814,43 @@ document.getElementById('ssoGo').onclick=async()=>{
 /* ═══════════════════ маршрутизация ═══════════════════ */
 /* Имя спрашиваем только у гостя: у вошедшего оно берётся из профиля mcko-app,
    и придумывать себе второе имя на доске не нужно. */
+/* Как войти на доску, которая пускает гостей.
+
+   Раньше выбора не было вовсе: человека без учётной записи уводило на форму
+   входа МЦКО, и всё заканчивалось там. Теперь спрашиваем прямо — у кого запись
+   есть, войдёт под своей и останется собой; у кого нет, пройдёт по имени.
+
+   Уровень доступа показываем честно: если владелец дал только смотреть, гость
+   должен узнать об этом до входа, а не после первой попытки написать. */
+function askGuestWay(entry){
+  return new Promise(resolve=>{
+    const canDraw=entry.guest==='edit';
+    const m=document.createElement('div');
+    m.className='modal';
+    m.innerHTML='<div class="sheet">'+
+      '<h2>'+escapeHtml(entry.title||'Доска')+'</h2>'+
+      '<p>'+(canDraw
+        ? 'По этой ссылке можно смотреть и писать.'
+        : 'По этой ссылке можно смотреть. Писать разрешает преподаватель.')+'</p>'+
+      '<input id="gnm" placeholder="Ваше имя — его увидят остальные" maxlength="24">'+
+      '<button class="btn" id="gGo">Войти как гость</button>'+
+      '<button class="btn ghost" id="gAcc">У меня есть учётная запись МЦКО</button>'+
+      '<div class="err" id="gEr"></div></div>';
+    document.body.appendChild(m);
+    const inp=m.querySelector('#gnm');
+    inp.value=S.name||'';
+    setTimeout(()=>inp.focus(),0);
+    const asGuest=()=>{
+      const v=inp.value.trim();
+      if(!v){m.querySelector('#gEr').textContent='Представьтесь, пожалуйста';return;}
+      S.name=v;store.set('doska.name',v);m.remove();resolve('guest');
+    };
+    m.querySelector('#gGo').onclick=asGuest;
+    inp.onkeydown=e=>{if(e.key==='Enter')asGuest();};
+    m.querySelector('#gAcc').onclick=()=>{m.remove();resolve('account');};
+  });
+}
+
 function askName(){
   return new Promise(resolve=>{
     const m=document.createElement('div');
@@ -3869,21 +3945,35 @@ async function route(){
     let me=null;
     try{ me=await api('/auth/me'); }catch{}
     if(!me){
-      // ссылка от учителя у того, кто уже сидит в mcko-app: личность заберём
-      // оттуда, а не будем спрашивать пароль второй раз
+      /* Сначала спрашиваем саму доску, пускает ли она без учётной записи.
+
+         Раньше первым делом шли в МЦКО за личностью, а mckoEnter уводит
+         страницу целиком. У кого аккаунта нет, тот попадал на чужую форму
+         входа и обратно уже не возвращался: включённый гостевой доступ ничего
+         не менял, потому что до него дело не доходило. */
+      let entry=null;
+      try{ entry=await api('/board-entry?b='+encodeURIComponent(id)); }catch{}
+      if(entry&&entry.guest&&entry.guest!=='none'){
+        const how=await askGuestWay(entry);
+        if(how==='account'){
+          const r=await mckoEnter(id);
+          if(r==='go')return;
+          nav('/login?next='+encodeURIComponent('/board/'+id)+(r==='loop'?'&e=sso':''));
+          return;
+        }
+        try{
+          await api('/guest/enter',{method:'POST',body:{board:id,name:S.name,guestId:guestId()}});
+          return openBoard(id);
+        }catch(e){
+          showView('dash');
+          grid.innerHTML='<div class="empty">Не удалось войти гостем: '+e.message+'</div>';
+          return;
+        }
+      }
+
+      // гостей не пускают — значит по учётной записи, как и раньше
       const r=await mckoEnter(id);
       if(r==='go')return;
-
-      /* Гостевой доступ включён — пускаем прямо по этой ссылке, спросив только
-         имя. Раньше отсюда уводило на вход всегда, и включённая настройка
-         ничего не меняла: пропуском был отдельный токен, который выпускался
-         лишь кнопкой «Копировать». Теперь пропуск — сам адрес доски. */
-      if(!S.name)await askName();
-      try{
-        await api('/guest/enter',{method:'POST',body:{board:id,name:S.name,guestId:guestId()}});
-        return openBoard(id);
-      }catch{ /* гостей не пускают — значит по паролю */ }
-
       nav('/login?next='+encodeURIComponent('/board/'+id)+(r==='loop'?'&e=sso':''));
       return;
     }
