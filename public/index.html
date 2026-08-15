@@ -10,7 +10,14 @@
     --text:#E9E7E2; --muted:#8C9199; --accent:#1A1C20; --r:14px;
   }
   *{box-sizing:border-box}
-  html,body{height:100%;margin:0;overflow:hidden;overscroll-behavior:none;background:var(--paper)}
+  /* Страницу держим неподвижной.
+
+     Во встроенном браузере Telegram она иначе едет под пальцем: сворачивается
+     шапка, дёргается высота окна, и рисовать нечем — линия рвётся вслед за
+     прыжками. position:fixed убирает саму возможность прокрутки, а
+     overscroll-behavior — оттягивание за край. */
+  html,body{position:fixed;inset:0;width:100%;height:100%;margin:0;overflow:hidden;
+            overscroll-behavior:none;background:var(--paper)}
   body{font-family:"Inter","Segoe UI",-apple-system,system-ui,sans-serif;color:var(--text);
        -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
   button,input{font:inherit}
@@ -43,8 +50,12 @@
   /* кнопка «закрепить/убрать» — первая в панели, чтобы её было легко найти */
   .tool.pin{color:var(--muted)}
   .tool.pin.off{color:var(--text)}
-  .tool{width:42px;height:42px;border:0;border-radius:10px;background:transparent;color:var(--muted);
-    display:grid;place-items:center;cursor:pointer;transition:background .13s,color .13s}
+  /* flex:none обязателен: в колонке с ограниченной высотой флекс поджимал
+     кнопки, и на невысоком экране они выходили 23 px — мимо пальца. Пусть
+     лучше панель прокручивается, чем мельчает. */
+  .tool{width:42px;height:42px;flex:none;border:0;border-radius:10px;background:transparent;
+    color:var(--muted);display:grid;place-items:center;cursor:pointer;
+    transition:background .13s,color .13s}
   /* На невысоком экране кнопки ужимаются, чтобы влезли все: планшет лёжа —
      это 820 точек по высоте, и панель со всеми инструментами упиралась в край. */
   @media (max-height:900px){
@@ -53,10 +64,12 @@
     .tool svg{width:19px;height:19px}
     .sep{margin:2px 4px}
   }
+  /* Ниже 34 точек не опускаемся: это уже мимо пальца. Не влезло — панель
+     прокручивается, она для того и с overflow. */
   @media (max-height:720px){
     .dock{padding:5px;gap:3px}
-    .tool{width:32px;height:32px}
-    .tool svg{width:17px;height:17px}
+    .tool{width:34px;height:34px}
+    .tool svg{width:18px;height:18px}
   }
   .tool:hover{background:var(--panel-2);color:var(--text)}
   .tool.on{background:var(--accent);color:#fff}
@@ -240,10 +253,30 @@
   .err{color:#E4796F;font-size:12.5px;min-height:17px}
 
   @media (max-width:700px){
-    .dock{left:8px;padding:6px}.tool{width:38px;height:38px}
-    .pen{left:60px;width:164px}.hint{display:none}
-    .top{left:8px;transform:none;top:8px}
+    /* Верхняя панель остаётся справа. Прежняя строка прибивала её к левому
+       краю — наследство тех времён, когда панель стояла по центру. Вместе с
+       right:14px это растягивало её на всю ширину, и она ложилась прямо на
+       инструменты, закрывая маркер. */
+    .top{left:auto;right:8px;top:8px;max-width:calc(100vw - 16px)}
+    #title{max-width:38vw}
+    /* Инструменты уводим ниже панели и прижимаем к верху, а не к середине:
+       на телефоне столбец длинный, и по центру он упирается в оба края. */
+    .dock{left:8px;top:64px;transform:none;padding:5px;gap:3px;
+          max-height:calc(100vh - 132px)}
+    .dock.away{transform:translateX(calc(-100% - 10px))}
+    .dock.away:hover,.dock.away:focus-within,.dock.away.peek{transform:translateX(0)}
+    .edge{top:64px;transform:none;height:112px}
+    .tool{width:34px;height:34px}
+    .tool svg{width:18px;height:18px}
+    .pen{left:52px;width:164px}.hint{display:none}
     .wrap{padding:26px 16px 70px}
+    /* масштаб — мельче и компактнее: он справочный, а не главный */
+    .zoombar{right:8px;bottom:8px}
+    .zoombar .card{padding:3px}
+    /* Мельче тридцати точек не делаем даже ради компактности: в такую кнопку
+       пальцем не попасть. Ужимаем только подпись и отступы. */
+    .zoombar .mini{height:30px;min-width:30px;padding:0 6px;font-size:11px}
+    #zoom{font-size:11px;min-width:38px}
   }
   @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -2978,6 +3011,13 @@ document.getElementById('wipe').onclick=()=>{
   if(S.cap!=='owner')return;
   if(confirm('Очистить доску у всех участников? Это нельзя отменить.'))net.send({t:'clear'});
 };
+/* Во встроенном браузере Telegram холст всё равно пытается утянуть страницу:
+   touch-action он местами не слушает. Гасим само событие — но только над
+   холстом, чтобы окна и списки прокручивались как обычно. */
+document.addEventListener('touchmove',e=>{
+  if(e.target&&e.target.closest&&e.target.closest('#stage'))e.preventDefault();
+},{passive:false});
+
 /* ═══════════════════ панель: закрепить или прятать ═══════════════════
    Закреплённая всегда на месте — так привычнее на большом экране. Открепишь,
    и она уезжает за край, оставляя язычок: наводишь — выезжает обратно. На
@@ -2999,12 +3039,43 @@ document.getElementById('dockPin').onclick=()=>{
   applyDockPinned();
   hint(S.dockPinned?'Панель закреплена':'Панель прячется — наведите на левый край');
 };
-// язычок: наводим — панель выезжает и остаётся, пока с неё не уйдут
-dockEdge.addEventListener('pointerenter',()=>dockEl.classList.add('peek'));
-dockEl.addEventListener('pointerleave',()=>dockEl.classList.remove('peek'));
-dockEdge.addEventListener('click',()=>{
-  S.dockPinned=true;store.set('doska.dockPinned','1');applyDockPinned();
+/* Язычок работает и мышью, и пальцем.
+
+   Мышью: навёл — выехала, увёл — уехала. Пальцем наведения нет вовсе, поэтому
+   там она открывается касанием, а закрывается сама — как только инструмент
+   выбран или человек тронул холст. Раньше касание язычка закрепляло панель
+   насовсем, и на телефоне она навсегда занимала треть экрана. */
+/* «Тесный экран» определяем по ширине, а не по наличию наведения: наведение
+   врут и планшеты с мышью, и встроенные браузеры, а ширина не врёт. Именно она
+   и решает, мешает панель или нет. */
+const narrowScreen=()=>innerWidth<=700;
+const touchOnly=narrowScreen()||matchMedia('(hover:none)').matches;
+dockEdge.addEventListener('pointerenter',e=>{
+  if(e.pointerType!=='touch')dockEl.classList.add('peek');
 });
+dockEl.addEventListener('pointerleave',e=>{
+  if(e.pointerType!=='touch')dockEl.classList.remove('peek');
+});
+dockEdge.addEventListener('click',()=>{
+  if(touchOnly)dockEl.classList.add('peek');
+  else{S.dockPinned=true;store.set('doska.dockPinned','1');applyDockPinned();}
+});
+// выбрали инструмент — панель уходит обратно, чтобы не закрывать написанное
+dockEl.addEventListener('click',e=>{
+  if(!touchOnly||S.dockPinned)return;
+  if(e.target.closest('#dockPin')||e.target.closest('#shapesBtn'))return;
+  if(e.target.closest('.tool'))setTimeout(()=>dockEl.classList.remove('peek'),180);
+});
+// тронули холст — тоже убираем
+stage.addEventListener('pointerdown',()=>{
+  if(!S.dockPinned)dockEl.classList.remove('peek');
+},true);
+
+/* На телефоне панель по умолчанию спрятана: экран узкий, и столбец
+   инструментов съедает его заметную часть. На большом экране всё наоборот —
+   там она закреплена, как и была. */
+if(touchOnly&&store.get('doska.dockPinned')===null)S.dockPinned=false;
+applyDockPinned();          // состояние надо применить сразу, а не ждать нажатия
 
 document.getElementById('callAll').onclick=()=>{
   if(S.cap!=='owner')return;
