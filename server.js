@@ -635,6 +635,22 @@ const server = http.createServer(async (req, res) => {
           : { guest: 'none' });
       }
 
+      /* Сводка нагрузки для администратора.
+
+         Grafana слушает только localhost, и открывать её наружу ради вкладки в
+         доске значило бы завести вторую дверь с своим паролем. Вместо этого
+         доска сама спрашивает Prometheus — тот тоже только на localhost — и
+         отдаёт готовые числа. Наружу не появляется ничего нового, а смотреть
+         можно откуда угодно.
+
+         Роль проверяем здесь, а не в клиенте: клиенту верить нельзя. */
+      if (p === '/api/admin/stats') {
+        const s = await session.fromRequest(req);
+        if (!s || s.kind !== 'user') return reply(res, 401, { error: 'не авторизовано' });
+        if (s.role !== 'admin') return reply(res, 403, { error: 'только для администратора' });
+        return reply(res, 200, await adminStats());
+      }
+
       if (p === '/api/guest/enter')    return await handleGuestEnter(req, res);
       if (p === '/api/upload')         return await handleUpload(req, res, url);
       if (p.startsWith('/api/boards')) return await handleBoards(req, res, url, p);
@@ -723,6 +739,53 @@ function sendStatic(req, res, buf, ext) {
   if (how === 'br') zlib.brotliCompress(buf, {
     params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 9 } }, done);
   else zlib.gzip(buf, { level: 7 }, done);
+}
+
+/* ═══════════════ сводка для администратора ═══════════════
+   Спрашиваем Prometheus по соседству. Если его нет или он не отвечает, честно
+   говорим об этом, а не показываем нули: пустой график и сломанный сбор — это
+   разные вещи, и путать их нельзя. */
+const PROM = process.env.PROMETHEUS_URL || 'http://127.0.0.1:9090';
+
+async function promQuery(q) {
+  const r = await fetch(PROM + '/api/v1/query?query=' + encodeURIComponent(q),
+    { signal: AbortSignal.timeout(4000) });
+  if (!r.ok) throw new Error('Prometheus ответил ' + r.status);
+  const d = await r.json();
+  const v = d && d.data && d.data.result && d.data.result[0];
+  return v ? +v.value[1] : null;
+}
+
+/* Что показываем. Подписи здесь же: у числа без объяснения нет смысла. */
+const ADMIN_METRICS = [
+  ['boards',   'doska_rooms_open',        'Досок открыто'],
+  ['people',   'doska_ws_clients',        'Людей на досках'],
+  ['items',    'doska_items_total',       'Объектов во всех досках'],
+  ['points',   'doska_points_total',      'Точек'],
+  ['images',   'doska_images_total',      'Картинок'],
+  ['memory',   'doska_memory_bytes{part="rss"}', 'Память доски'],
+  ['uptime',   'doska_uptime_seconds',    'Сервер живёт'],
+  ['lag',      'histogram_quantile(0.95, sum(rate(doska_op_seconds_bucket[5m])) by (le))',
+               'Задержка операции, 95%'],
+  ['ops',      'sum(rate(doska_messages_total[5m]))', 'Операций в секунду'],
+  ['cpu',      '100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)',
+               'Загрузка процессора'],
+  ['freeMem',  'node_memory_MemAvailable_bytes', 'Свободная память машины'],
+  ['freeDisk', 'node_filesystem_avail_bytes{mountpoint="/"}', 'Свободно на диске'],
+];
+
+async function adminStats() {
+  const out = { at: Date.now(), ok: true, error: null, values: {} };
+  try {
+    const got = await Promise.all(ADMIN_METRICS.map(([, q]) => promQuery(q).catch(() => null)));
+    ADMIN_METRICS.forEach(([key, , label], i) => {
+      out.values[key] = { label, value: got[i] };
+    });
+    if (got.every(v => v === null)) { out.ok = false; out.error = 'Prometheus не отвечает или ещё не собрал данные'; }
+  } catch (e) {
+    out.ok = false; out.error = e.message;
+  }
+  return out;
 }
 
 /* ═══════════════ WebSocket ═══════════════ */
