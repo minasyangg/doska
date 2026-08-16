@@ -461,8 +461,10 @@
     <button class="mini ic" id="copy" title="Ссылка ученику">
       <svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="6" r="2.6"/><circle cx="18" cy="18" r="2.6"/><path d="M8.4 10.8l7.2-3.6M8.4 13.2l7.2 3.6"/></svg>
     </button>
-    <button class="mini ic" id="gear" hidden title="Доступ к доске">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.2M12 18.8V21M21 12h-2.2M5.2 12H3M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6M18.4 18.4l-1.6-1.6M7.2 7.2L5.6 5.6"/></svg>
+    <!-- Ключ, а не шестерёнка: шестерёнка означает «настройки чего угодно», а
+         здесь решают ровно один вопрос — кого пускать на доску. -->
+    <button class="mini ic" id="gear" hidden title="Кого пускать на доску">
+      <svg viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l8-8"/><path d="M17 6l2.5 2.5"/><path d="M15 8l2.5 2.5"/></svg>
     </button>
     <!-- Общий запрет рисовать переехал в окно доступа: чаще нужно унять
          одного участника, а не всю доску, и это делается списком напротив
@@ -2037,7 +2039,7 @@ stage.addEventListener('pointerdown',e=>{
      просто увеличивает написанное. Расплата честная: рисуя сильно отдалённым,
      линию видно тонкой — потому что она и есть маленькая для этой доски. */
   drawId=e.pointerId;
-  current=mkStroke(S.tool,S.color,S.size,newId(),S.me&&S.me.id);
+  current=mkStroke(S.tool,S.color,S.size,newId(),S.me&&S.me.uid);
   pressure=(e.pointerType==='pen'&&e.pressure>0)?e.pressure:0.42;
   lastPt=pt;lastT=performance.now();
   pushPoint(current,w.x,w.y,pressure);
@@ -2313,7 +2315,7 @@ function endPointer(e){
     const d=arcDraft;arcDraft=null;
     // совсем маленькую дугу не заводим: это был случайный тычок
     if(d.a0!==null&&d.r*S.cam.z>=6&&Math.abs(d.a1-d.a0)*d.r*S.cam.z>=4){
-      const it={id:newId(),by:S.me&&S.me.id,type:'arc',
+      const it={id:newId(),by:S.me&&S.me.uid,type:'arc',
                 cx:d.cx,cy:d.cy,r:d.r,a0:d.a0,a1:d.a1,
                 color:S.color,size:S.size,dash:S.dash,
                 g:null,locked:false,bbox:null};
@@ -2328,7 +2330,7 @@ function endPointer(e){
     const x0=Math.min(d.a.x,d.b.x), y0=Math.min(d.a.y,d.b.y);
     const w0=Math.abs(d.b.x-d.a.x), h0=Math.abs(d.b.y-d.a.y);
     if(Math.max(w0,h0)*S.cam.z>=3){
-      const it={id:newId(),by:S.me&&S.me.id,type:'shape',kind:d.kind,
+      const it={id:newId(),by:S.me&&S.me.uid,type:'shape',kind:d.kind,
                 x:x0,y:y0,w:Math.max(0.5,w0),h:Math.max(0.5,h0),rot:0,
                 color:S.color,size:S.size,dash:S.dash,fill:S.fill,locked:false};
       addItem(it);
@@ -2484,7 +2486,7 @@ function closeTextEditor(save){
     net.send({t:'move',id:ed.item.id,text:body});
     drawBoard();return;
   }
-  const it={id:newId(),by:S.me&&S.me.id,type:'text',text:body,
+  const it={id:newId(),by:S.me&&S.me.uid,type:'text',text:body,
             x:ed.x,y:ed.y,w:ed.w,rot:0,color:S.color,size:ed.size,
             bold:false,italic:false,g:null,locked:false,bbox:null};
   addItem(it);
@@ -2494,7 +2496,7 @@ function closeTextEditor(save){
 }
 
 function commitPath(kind,pts){
-  const it={id:newId(),by:S.me&&S.me.id,type:'path',kind,
+  const it={id:newId(),by:S.me&&S.me.uid,type:'path',kind,
             pts:pts.map(p=>({x:p.x,y:p.y})),closed:kind==='polygon',
             color:S.color,size:S.size,dash:S.dash,
             fill:kind==='polygon'?S.fill:null,
@@ -2599,7 +2601,7 @@ async function placeImage(blob,screenPt){
     const k=Math.min(1,vw*0.7/bmp.width,vh*0.7/bmp.height);
     const w=bmp.width*k, h=bmp.height*k;
     const c=screenPt?toWorld(screenPt.x,screenPt.y):toWorld(board.clientWidth/2,board.clientHeight/2);
-    const it={id:newId(),by:S.me&&S.me.id,type:'image',url:data.url,
+    const it={id:newId(),by:S.me&&S.me.uid,type:'image',url:data.url,
               x:c.x-w/2,y:c.y-h/2,w,h,rot:0,locked:false};
     addItem(it);
     undoStack.push({type:'add',item:it});redoStack.length=0;
@@ -3300,10 +3302,10 @@ function pasteClipboard(at){
   for(const it of raws){
     const g=it.g?(gmap.get(it.g)||gmap.set(it.g,newId()).get(it.g)):null;
     const clone=BOX_TYPES.has(it.type)
-      ?{...it,id:newId(),by:S.me&&S.me.id,x:it.x+dx,y:it.y+dy,g,bbox:null,locked:false}
+      ?{...it,id:newId(),by:S.me&&S.me.uid,x:it.x+dx,y:it.y+dy,g,bbox:null,locked:false}
       :ARC_TYPES.has(it.type)
-      ?{...it,id:newId(),by:S.me&&S.me.id,cx:it.cx+dx,cy:it.cy+dy,g,bbox:null,locked:false}
-      :{...it,id:newId(),by:S.me&&S.me.id,g,bbox:null,locked:false,
+      ?{...it,id:newId(),by:S.me&&S.me.uid,cx:it.cx+dx,cy:it.cy+dy,g,bbox:null,locked:false}
+      :{...it,id:newId(),by:S.me&&S.me.uid,g,bbox:null,locked:false,
         pts:it.pts.map(p=>('p' in p)?{x:p.x+dx,y:p.y+dy,p:p.p}:{x:p.x+dx,y:p.y+dy})};
     addItem(clone);
     net.send({t:'add',item:deflate(clone)});
@@ -3593,7 +3595,7 @@ async function loadBoards(){
    с главным. */
 const ICON_LINK='<svg viewBox="0 0 24 24"><path d="M10.5 13.5a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1.5 1.5"/><path d="M13.5 10.5a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.5-1.5"/></svg>';
 const ICON_TRASH='<svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg>';
-const ICON_GEAR='<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.2M12 18.8V21M21 12h-2.2M5.2 12H3M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6M18.4 18.4l-1.6-1.6M7.2 7.2L5.6 5.6"/></svg>';
+const ICON_GEAR='<svg viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l8-8"/><path d="M17 6l2.5 2.5"/><path d="M15 8l2.5 2.5"/></svg>';
 
 function boardCard(b){
   const el=document.createElement('div');
@@ -3622,7 +3624,7 @@ function boardCard(b){
     setTimeout(()=>x.classList.remove('done'),1400);
   });
   if(b.mine){
-    tool('',ICON_GEAR,'Доступ к доске',()=>openSettings(b.id));
+    tool('',ICON_GEAR,'Кого пускать на доску',()=>openSettings(b.id));
     tool('del',ICON_TRASH,'Удалить доску',async()=>{
       if(!confirm('Удалить доску «'+b.title+'» вместе со всем содержимым?'))return;
       try{ await api('/boards/'+b.id,{method:'DELETE'});
