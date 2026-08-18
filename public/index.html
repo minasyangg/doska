@@ -3129,10 +3129,41 @@ document.getElementById('follow').onclick=e=>{
   e.currentTarget.classList.toggle('on',S.following);
   hint(S.following?'Вы следуете за преподавателем':'Свободный просмотр');
 };
+/* Кладём строку в буфер обмена.
+
+   navigator.clipboard есть только на защищённом соединении, а доска пока
+   отдаётся по обычному http — поэтому там он молча отказывает, и раньше код
+   уходил на запасной путь с окном, куда ссылка выводилась текстом. Человек
+   ждал «скопировано», а получал окно, которое надо закрывать руками.
+
+   Запасной путь теперь настоящий: временное поле и старая команда копирования.
+   Она работает и без защищённого соединения, и никаких окон не показывает. */
+async function toClipboard(text){
+  try{
+    if(navigator.clipboard&&window.isSecureContext){
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  }catch{ /* не вышло — пробуем по-старому */ }
+  try{
+    const ta=document.createElement('textarea');
+    ta.value=text;
+    ta.setAttribute('readonly','');
+    // за экраном, но в документе: невидимое поле не копируется
+    ta.style.cssText='position:fixed;top:-1000px;left:-1000px;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();ta.setSelectionRange(0,text.length);
+    const done=document.execCommand('copy');
+    ta.remove();
+    return done;
+  }catch{ return false; }
+}
+
 async function copyLink(id,label){
   const link=location.origin+'/board/'+id;
-  try{await navigator.clipboard.writeText(link);hint(label+' скопирована');}
-  catch{prompt(label+':',link);}
+  hint(await toClipboard(link)
+    ? label+' скопирована'
+    : 'Не вышло скопировать — вот она: '+link);
 }
 
 /* Списки панели: открыт может быть только один, щелчок мимо закрывает оба. */
@@ -3930,10 +3961,13 @@ async function openSettings(id){
     try{
       let g=(await api('/boards/'+id+'/guest-link')).token;
       if(!g)g=(await api('/boards/'+id+'/guest-link',{method:'POST'})).token;
+      // Гостевая ссылка теперь и не нужна отдельно: доска пускает по своему
+      // адресу. Кнопку оставляем — по ней копируется именно она.
       const link=location.origin+'/board/'+id+'?g='+encodeURIComponent(g);
-      try{await navigator.clipboard.writeText(link);err('');$('#stCopy').textContent='Скопировано';
-          setTimeout(()=>{$('#stCopy').textContent='Копировать';},1600);}
-      catch{prompt('Гостевая ссылка:',link);}
+      if(await toClipboard(link)){
+        err('');$('#stCopy').textContent='Скопировано';
+        setTimeout(()=>{$('#stCopy').textContent='Копировать';},1600);
+      }else err('Не вышло скопировать: '+link);
     }catch(e){err(e.message);}
   };
 }
