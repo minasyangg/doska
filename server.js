@@ -1314,8 +1314,14 @@ setInterval(async () => {
   }
 }, 60000);
 
-server.listen(PORT, () => {
-  console.log('Доска: http://localhost:' + PORT);
+/* На каком адресе слушать. По умолчанию все — так работает на своей машине и
+   в проверках. За обратным прокси стоит указать 127.0.0.1: тогда порт доски
+   снаружи попросту не виден, и единственная дверь в приложение — прокси с
+   сертификатом. */
+const HOST = process.env.HOST || '0.0.0.0';
+
+server.listen(PORT, HOST, () => {
+  console.log('Доска: http://' + (HOST === '0.0.0.0' ? 'localhost' : HOST) + ':' + PORT);
   console.log('Данные: ' + DATA_DIR);
 });
 
