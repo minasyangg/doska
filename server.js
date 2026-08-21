@@ -606,9 +606,31 @@ async function collectOrphanFiles(id) {
   }
 }
 
+/* Постоянный адрес доски. Пока он задан, обращения по старому — по голому
+   IP с портом — переводятся на него же по https.
+
+   Так продолжают работать ссылки, разосланные раньше: ученик открывает старую,
+   его молча переводит на защищённое соединение, и доска открывается та же.
+   Заодно исчезает половина бед незащищённого соединения — буфер обмена,
+   предупреждения Telegram и мобильных браузеров. */
+const SITE_URL = (process.env.SITE_URL || '').replace(/\/+$/, '');
+const SITE_HOST = SITE_URL ? SITE_URL.replace(/^https?:\/\//, '') : '';
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   const p = url.pathname;
+
+  if (SITE_HOST) {
+    const host = String(req.headers.host || '');
+    const bare = host.replace(/:\d+$/, '');
+    // Caddy ходит на 127.0.0.1 — его не трогаем, иначе получится круг
+    const local = bare === 'localhost' || bare === '127.0.0.1' || bare === '::1';
+    if (!local && bare !== SITE_HOST.replace(/^www\./, '') && bare !== SITE_HOST &&
+        bare !== 'www.' + SITE_HOST) {
+      res.writeHead(308, { location: SITE_URL + req.url, 'cache-control': 'no-store' });
+      return res.end();
+    }
+  }
 
   try {
     if (p.startsWith('/api/')) {
