@@ -258,6 +258,15 @@
   .note code{background:#E3DDD0;padding:1px 5px;border-radius:4px;font-size:11.5px}
   .note b{color:#1A1C20}
 
+  /* ══ прелоадер: вход на доску, потеря связи, список досок ══ */
+  .spin{width:32px;height:32px;border:3px solid #DCD5C6;border-top-color:#7A7368;
+    border-radius:50%;animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  #boardLoader{position:fixed;inset:0;z-index:40;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:14px;background:var(--paper);
+    color:#7A7368;font-size:13.5px}
+  .empty .spin{margin:0 auto 12px}
+
   /* ══ диалог ══ */
   .modal{position:fixed;inset:0;z-index:60;display:grid;place-items:center;background:rgba(26,28,32,.5);backdrop-filter:blur(3px)}
   .sheet{width:min(430px,92vw);background:var(--panel);border:1px solid var(--edge);border-radius:18px;
@@ -383,6 +392,11 @@
 <div id="stage" class="hidden">
   <canvas id="board" class="layer"></canvas>
   <canvas id="live"  class="layer"></canvas>
+</div>
+
+<div id="boardLoader" class="hidden">
+  <div class="spin"></div>
+  <div id="boardLoaderText">Загружаю доску…</div>
 </div>
 
 <div class="edge" id="dockEdge" title="Показать инструменты"></div>
@@ -1535,6 +1549,28 @@ function applyCursor(){
 let hoverHandleCursor=null;
 
 /* ═══════════════════ сеть ═══════════════════ */
+/* Прелоадер доски. При входе держим его, пока не придут все объекты (событие
+   'init') — до этого доска на экране пустая, и показывать её как «готовую»
+   было бы враньём. При обрыве связи посреди занятия — то, что уже нарисовано,
+   никуда не делось, дожидаться нового 'init' незачем: снимаем прелоадер сразу,
+   как только сокет снова открылся. Различает эти два случая один флаг:
+   boardLoaded ещё не true — значит это первый вход, а не переподключение. */
+let boardLoaded=false;
+let boardLoaderTimer=null;
+const boardLoaderEl=document.getElementById('boardLoader');
+const boardLoaderText=document.getElementById('boardLoaderText');
+function showBoardLoader(text){
+  boardLoaderText.textContent=text;
+  boardLoaderEl.classList.remove('hidden');
+  // Не держать человека в подвешенном состоянии вечно, если 'init' почему-то
+  // не пришёл: через 20с подсказываем перезагрузить, а не молчим дальше.
+  clearTimeout(boardLoaderTimer);
+  boardLoaderTimer=setTimeout(()=>{
+    boardLoaderText.textContent='Долго не отвечает. Проверьте связь или обновите страницу.';
+  },20000);
+}
+function hideBoardLoader(){boardLoaderEl.classList.add('hidden');clearTimeout(boardLoaderTimer);}
+
 const net={
   ws:null,tries:0,sent:0,sid:null,tCur:0,tView:0,
   // Сокет ходит строго на свой origin: рукопожатие аутентифицируется кукой,
@@ -1550,19 +1586,25 @@ const net={
     setConn('wait','Подключаюсь…');
     const ws=new WebSocket(u); this.ws=ws;
     ws.onopen=()=>{this.tries=0;setConn('ok','На связи');
+      // Переподключение: то, что уже нарисовано, на экране осталось — не
+      // держим прелоадер до нового 'init', снимаем сразу по факту связи.
+      if(boardLoaded)hideBoardLoader();
       ws.send(JSON.stringify({t:'join',room:S.boardId,name:S.name}));};
     ws.onmessage=e=>{try{this.on(JSON.parse(e.data));}catch{}};
     ws.onclose=ev=>{
-      if(ev.code===4004){setConn('off','Доска удалена');return;}
-      if(ev.code===4003){setConn('off','Доступ к доске закрыт');deniedScreen();return;}
+      if(ev.code===4004){hideBoardLoader();setConn('off','Доска удалена');return;}
+      if(ev.code===4003){hideBoardLoader();setConn('off','Доступ к доске закрыт');deniedScreen();return;}
       // 401 на рукопожатии приходит как обычное закрытие: сессии нет — на вход
-      if(ev.code===1006&&!S.you){nav('/login?next='+encodeURIComponent(location.pathname));return;}
+      if(ev.code===1006&&!S.you){hideBoardLoader();nav('/login?next='+encodeURIComponent(location.pathname));return;}
       setConn('off','Связь потеряна, переподключаюсь…');
+      // Обрыв посреди уже загруженного занятия — накрываем прелоадером снова,
+      // пока идёт первый вход, он и так на экране с самого openBoard().
+      if(boardLoaded)showBoardLoader('Связь потеряна, переподключаюсь…');
       this.tries++; setTimeout(()=>{if(S.boardId)this.connect();},Math.min(8000,600*this.tries));
     };
     ws.onerror=()=>{};
   },
-  close(){if(this.ws){this.ws.onclose=null;this.ws.close();this.ws=null;}},
+  close(){if(this.ws){this.ws.onclose=null;this.ws.close();this.ws=null;}hideBoardLoader();},
   send(o){if(this.ws&&this.ws.readyState===1)this.ws.send(JSON.stringify(o));},
 
   on(m){
@@ -1577,6 +1619,10 @@ const net={
         setTitle(m.title);
         applyRole();renderPeers();drawBoard();
         hint(m.items.length?('Доска загружена: '+m.items.length+' объектов'):'Доска пустая — можно начинать');
+        // Все объекты пришли и отрисованы — прелоадер входа снят. Дальше
+        // 'init' будет приходить и при переподключении, но тогда его уже
+        // снял ws.onopen, и boardLoaded=true защищает от повторной работы.
+        if(!boardLoaded){boardLoaded=true;hideBoardLoader();}
         break;
       }
       case 'peer':{
@@ -3612,12 +3658,21 @@ function renderWho(){
   el.append(b,out);
 }
 
-async function loadBoards(){
-  grid.innerHTML='<div class="empty">Загружаю…</div>';
+async function loadBoards(retriesLeft){
+  if(retriesLeft===undefined)retriesLeft=2;
+  grid.innerHTML='<div class="empty"><div class="spin"></div>Загружаю…</div>';
   let d;
   try{ d=await api('/boards'); }
   catch(e){
     if(e.status===401){nav('/login');return;}
+    if(retriesLeft>0){
+      // Сразу после входа первый запрос к списку изредка бьёт по ещё не
+      // прогретому соединению до Supabase и падает по сети — раньше в этом
+      // случае помогало только ручное обновление страницы. Пробуем сами,
+      // прежде чем сдаться и показать ошибку.
+      setTimeout(()=>loadBoards(retriesLeft-1),700);
+      return;
+    }
     grid.innerHTML='<div class="empty">Не удалось получить список: '+e.message+'</div>';
     return;
   }
@@ -4164,7 +4219,8 @@ function nav(path){
 
 async function openBoard(id){
   if(S.boardId===id&&net.ws)return;
-  net.close();
+  net.close();                        // тоже снимет прелоадер — включаем его после
+  boardLoaded=false;showBoardLoader('Загружаю доску…');
   S.boardId=id;S.cap='none';S.me=null;select(null);
   showView('board');
   resize();
