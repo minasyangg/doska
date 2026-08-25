@@ -1270,6 +1270,10 @@ function flushBoard(){
 }
 
 const remoteLive=new Map(), cursors=new Map(), peers=new Map();
+// область экрана каждого участника (id -> {cam,w,h,seen}) — для стрелок
+// «участник смотрит в другой стороне», когда его поле зрения не совпадает
+// с нашим (см. flushLive)
+const peerViews=new Map();
 let hoverPt=null;                                   // для кольца ластика
 
 function flushLive(){
@@ -1481,7 +1485,38 @@ function flushLive(){
     lctx.fillStyle='#fff'; lctx.fillText(p.name,s.x+14,s.y+18);
     lctx.globalAlpha=1;
   }
-  if(cursors.size)liveDirty=true;
+  // Указатели «участник смотрит в другой стороне» — как в iDroo: если чья-то
+  // видимая область не пересекается с моей, у края экрана в её сторону
+  // рисуется стрелка его цвета с именем. Иначе непонятно, куда вообще
+  // смотрит человек — особенно ученику, где сейчас объясняет учитель.
+  for(const[id,v] of peerViews){
+    if(now-v.seen>8000){peerViews.delete(id);continue;}
+    const p=peers.get(id); if(!p||!v.cam||!v.w||!v.h)continue;
+    // их видимая область в мировых координатах — по их же присланным cam/w/h
+    const tL=(0-v.cam.x)/v.cam.z, tR=(v.w-v.cam.x)/v.cam.z;
+    const tT=(0-v.cam.y)/v.cam.z, tB=(v.h-v.cam.y)/v.cam.z;
+    const myTl=toWorld(0,0), myBr=toWorld(board.clientWidth,board.clientHeight);
+    const overlap=tL<myBr.x&&tR>myTl.x&&tT<myBr.y&&tB>myTl.y;
+    if(overlap)continue;
+    const sp=toScreen((tL+tR)/2,(tT+tB)/2);
+    const pad=28;
+    const cx=Math.max(pad,Math.min(board.clientWidth-pad,sp.x));
+    const cy=Math.max(pad,Math.min(board.clientHeight-pad,sp.y));
+    const ang=Math.atan2(sp.y-cy,sp.x-cx);
+    lctx.save();
+    lctx.translate(cx,cy);lctx.rotate(ang);
+    lctx.fillStyle=p.color;
+    lctx.beginPath();lctx.moveTo(12,0);lctx.lineTo(-7,-7);lctx.lineTo(-7,7);lctx.closePath();lctx.fill();
+    lctx.strokeStyle='rgba(255,255,255,.85)';lctx.lineWidth=1.3;lctx.stroke();
+    lctx.restore();
+    lctx.font='600 11px Inter,system-ui,sans-serif';
+    const tw=lctx.measureText(p.name).width+10;
+    const lx=Math.max(4,Math.min(board.clientWidth-tw-4,cx+12));
+    const ly=Math.max(20,Math.min(board.clientHeight-4,cy-6));
+    lctx.fillStyle=p.color; roundRect(lctx,lx,ly,tw,17,8); lctx.fill();
+    lctx.fillStyle='#fff'; lctx.fillText(p.name,lx+5,ly+12);
+  }
+  if(cursors.size||peerViews.size)liveDirty=true;
 }
 function roundRect(c,x,y,w,h,r){
   c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);
@@ -1499,7 +1534,7 @@ function zoomAt(sx,sy,f){
 }
 function camChanged(){
   document.getElementById('zoom').textContent=Math.round(S.cam.z*100)+'%';
-  drawBoard();drawLive();net.sendView();
+  drawBoard();drawLive();net.sendView();net.sendPresence();
 }
 
 /* ═══════════════════ курсоры ═══════════════════ */
@@ -1573,7 +1608,7 @@ function showBoardLoader(text){
 function hideBoardLoader(){boardLoaderEl.classList.add('hidden');clearTimeout(boardLoaderTimer);}
 
 const net={
-  ws:null,tries:0,sent:0,sid:null,tCur:0,tView:0,
+  ws:null,tries:0,sent:0,sid:null,tCur:0,tView:0,tPresence:0,
   // Сокет ходит строго на свой origin: рукопожатие аутентифицируется кукой,
   // а её на чужой хост браузер не отдаст. Прежняя лазейка ?server= вместе с
   // этим и потеряла смысл.
@@ -1612,7 +1647,7 @@ const net={
     switch(m.t){
       case 'init':{
         S.me=m.you;S.cap=m.you.cap;S.locked=m.locked;S.anyEdit=!!m.anyEdit;
-        peers.clear();
+        peers.clear();peerViews.clear();
         peers.set(m.you.id,{name:m.you.name+' (вы)',color:m.you.color,cap:m.you.cap});
         for(const p of m.peers)peers.set(p.id,{name:p.name,color:p.color,cap:p.cap});
         items=[];byId.clear();undoStack=[];redoStack=[];selected=null;
@@ -1624,6 +1659,7 @@ const net={
         // 'init' будет приходить и при переподключении, но тогда его уже
         // снял ws.onopen, и boardLoaded=true защищает от повторной работы.
         if(!boardLoaded){boardLoaded=true;hideBoardLoader();}
+        net.sendPresence();       // сразу объявляем свою область — не ждём первого движения камеры
         break;
       }
       case 'peer':{
@@ -1631,8 +1667,9 @@ const net={
         peers.set(m.peer.id,{name:m.peer.name,color:m.peer.color,cap:m.peer.cap});
         renderPeers();if(!was)hint(m.peer.name+' вошёл');break;
       }
-      case 'left':{const p=peers.get(m.id);peers.delete(m.id);cursors.delete(m.id);
+      case 'left':{const p=peers.get(m.id);peers.delete(m.id);cursors.delete(m.id);peerViews.delete(m.id);
         renderPeers();if(p)hint(p.name+' вышел');break;}
+      case 'presence':peerViews.set(m.id,{cam:m.cam,w:m.w,h:m.h,seen:performance.now()});drawLive();break;
       case 'title':setTitle(m.title);break;
       case 'live':{
         let s=remoteLive.get(m.sid);
@@ -1705,6 +1742,14 @@ const net={
     if(S.cap!=='owner')return;
     const n=performance.now();if(n-this.tView<120)return;this.tView=n;
     this.send({t:'view',cam:{x:S.cam.x,y:S.cam.y,z:S.cam.z},w:board.clientWidth});
+  },
+  // Своя видимая область — всем, не только владельцу (в отличие от 'view'):
+  // это не управление чужой камерой, а просто «вот где я сейчас смотрю»,
+  // нужно и учителю видеть учеников, и ученику — учителя.
+  sendPresence(){
+    const n=performance.now();if(n-this.tPresence<250)return;this.tPresence=n;
+    this.send({t:'presence',cam:{x:S.cam.x,y:S.cam.y,z:S.cam.z},
+               w:board.clientWidth,h:board.clientHeight});
   }
 };
 
@@ -1977,6 +2022,11 @@ stage.addEventListener('pointerdown',e=>{
     applyCursor();return;
   }
   if(e.button!==0&&e.pointerType==='mouse')return;
+
+  // Начали действие любым инструментом, кроме «выделить», — прежнее
+  // выделение снимаем сразу. Раньше оно переживало переключение на перо и
+  // оставалось видимым (рамка, ручки) поверх уже начатого рисования.
+  if(S.tool!=='select'&&selected)select(null);
 
   /* циркуль: нажали — поставили ножку, ведём — разводим и обводим */
   if(S.tool==='arc'){
