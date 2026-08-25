@@ -431,7 +431,8 @@
     <button class="x" id="penClose" title="Закрыть (Esc)">×</button>
   </div>
   <div><canvas id="preview"></canvas></div>
-  <div><div class="label" style="margin-bottom:7px">Цвет</div><div class="inks" id="inks"></div></div>
+  <div><div class="label" style="margin-bottom:7px">Цвет</div><div class="inks" id="inks"></div>
+    <input type="color" id="inkCustom" class="hidden"></div>
   <div><div class="label" style="margin-bottom:5px">Толщина <span id="sizeVal" style="color:var(--text)">4</span></div>
     <input type="range" id="size" min="1" max="40" step="0.5" value="4"></div>
   <div id="fillRow" class="hidden"><div class="label" style="margin-bottom:7px">Заливка</div><div class="inks" id="fills"></div></div>
@@ -2115,7 +2116,11 @@ stage.addEventListener('pointermove',e=>{
     const[a,b]=[...pointers.values()];
     const d=Math.hypot(a.x-b.x,a.y-b.y),c={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
     S.cam.x+=c.x-pinch.c.x;S.cam.y+=c.y-pinch.c.y;
-    if(pinch.d>0)zoomAt(c.x,c.y,d/pinch.d);
+    // Пальцы у пинча редко идеально разведены на старте жеста: если в момент
+    // касания они оказались в паре пикселей друг от друга, d/pinch.d в первом
+    // же кадре даёт огромное отношение (деление на почти-ноль) — доску рвёт
+    // масштабом и швыряет в сторону. Тот же предел на кадр, что и у колеса.
+    if(pinch.d>4)zoomAt(c.x,c.y,Math.min(1.22,Math.max(0.82,d/pinch.d)));
     pinch={d,c};camChanged();return;
   }
   if(panning){
@@ -2743,19 +2748,38 @@ function applyStyleToSelection(key,value){
   pushUndo(ops);
   drawBoard();
 }
+/* Кнопка «свой цвет»: не входит в PENS/MARKERS, поэтому не дублирует пресеты
+   на вид. Пока текущий цвет — один из пресетов, показывает радужный кружок
+   как приглашение; как только выбрали что-то своё через системную палитру,
+   показывает именно этот цвет и держит рамку «выбрано», как обычный пресет. */
+const CUSTOM_WHEEL='conic-gradient(red,#ff0,#0f0,#0ff,#00f,#f0f,red)';
+const inkCustomInput=document.getElementById('inkCustom');
+function setInkColor(c){
+  S.color=c;
+  if(S.tool==='marker')S.markerColor=c;else if(S.tool==='pen')S.penColor=c;
+  renderInks();drawPreview();
+  applyStyleToSelection('color',c);
+}
+inkCustomInput.oninput=()=>setInkColor(inkCustomInput.value);
 function renderInks(){
   inksEl.innerHTML='';
-  for(const c of palette()){
+  const pal=palette();
+  for(const c of pal){
     const b=document.createElement('button');
     b.className='ink'+(c===S.color?' on':'');b.style.background=c;b.title=c;
-    b.onclick=()=>{
-      S.color=c;
-      if(S.tool==='marker')S.markerColor=c;else if(S.tool==='pen')S.penColor=c;
-      renderInks();drawPreview();
-      applyStyleToSelection('color',c);
-    };
+    b.onclick=()=>setInkColor(c);
     inksEl.appendChild(b);
   }
+  // Регистр важен: системная палитра всегда отдаёт hex строчными буквами,
+  // а пресеты записаны как попало — иначе свой цвет, случайно совпавший
+  // с пресетом, выглядел бы одновременно выбранным в двух местах.
+  const isCustom=!pal.some(p=>p.toLowerCase()===S.color.toLowerCase());
+  const custom=document.createElement('button');
+  custom.className='ink'+(isCustom?' on':'');
+  custom.style.background=isCustom?S.color:CUSTOM_WHEEL;
+  custom.title='Свой цвет…';
+  custom.onclick=()=>{inkCustomInput.value=/^#[0-9a-f]{6}$/i.test(S.color)?S.color:'#000000';inkCustomInput.click();};
+  inksEl.appendChild(custom);
 }
 const NO_FILL_BG='repeating-linear-gradient(45deg,#fff,#fff 3px,#c33 3px,#c33 4px)';
 function renderFills(){
@@ -3592,45 +3616,49 @@ document.getElementById('png').onclick=()=>{
 addEventListener('keydown',e=>{
   if(/INPUT|TEXTAREA/.test((e.target||{}).tagName||''))return;
   if(!S.boardId)return;                       // состояние роутера, а не вид DOM
-  const k=e.key.toLowerCase();
-  if(e.code==='Space'&&!spaceDown){spaceDown=true;applyCursor();e.preventDefault();}
-  if((e.ctrlKey||e.metaKey)&&k==='z'){e.preventDefault();e.shiftKey?redo():undo();return;}
-  if((e.ctrlKey||e.metaKey)&&k==='y'){e.preventDefault();redo();return;}
-  if((e.ctrlKey||e.metaKey)&&k==='d'){e.preventDefault();duplicateSelected();return;}
-  if((e.ctrlKey||e.metaKey)&&k==='a'){e.preventDefault();selectAll();return;}
-  if((e.ctrlKey||e.metaKey)&&k==='c'){e.preventDefault();copySelected(false);return;}
-  if((e.ctrlKey||e.metaKey)&&k==='x'){e.preventDefault();copySelected(true);return;}
+  // Физическая клавиша, а не e.key: на нелатинской раскладке (русская
+  // ЙЦУКЕН и т.п.) Ctrl+Z/Ctrl+C отдают e.key='я'/'с' (кириллица на той же
+  // позиции), и сравнение с 'z'/'c' никогда не совпадало бы. e.code называет
+  // клавишу по месту на клавиатуре и не зависит от раскладки вообще.
+  const c=e.code;
+  if(c==='Space'&&!spaceDown){spaceDown=true;applyCursor();e.preventDefault();}
+  if((e.ctrlKey||e.metaKey)&&c==='KeyZ'){e.preventDefault();e.shiftKey?redo():undo();return;}
+  if((e.ctrlKey||e.metaKey)&&c==='KeyY'){e.preventDefault();redo();return;}
+  if((e.ctrlKey||e.metaKey)&&c==='KeyD'){e.preventDefault();duplicateSelected();return;}
+  if((e.ctrlKey||e.metaKey)&&c==='KeyA'){e.preventDefault();selectAll();return;}
+  if((e.ctrlKey||e.metaKey)&&c==='KeyC'){e.preventDefault();copySelected(false);return;}
+  if((e.ctrlKey||e.metaKey)&&c==='KeyX'){e.preventDefault();copySelected(true);return;}
   // Ctrl+V перехватываем только для своего буфера: картинку из системного
   // ловит обработчик paste, и мешать ему нельзя
-  if((e.ctrlKey||e.metaKey)&&k==='v'&&clipboard.length){
+  if((e.ctrlKey||e.metaKey)&&c==='KeyV'&&clipboard.length){
     e.preventDefault();pasteClipboard(hoverPt?toWorld(hoverPt.x,hoverPt.y):null);return;
   }
-  if((e.ctrlKey||e.metaKey)&&k==='g'){
+  if((e.ctrlKey||e.metaKey)&&c==='KeyG'){
     e.preventDefault();e.shiftKey?ungroupSelected():groupSelected();return;
   }
   if(e.ctrlKey||e.metaKey)return;
-  if(k===']'&&selection.length){e.preventDefault();moveLayer('front');return;}
-  if(k==='['&&selection.length){e.preventDefault();moveLayer('back');return;}
-  if(k==='escape'&&menuEl.classList.contains('show')){closeMenu();return;}
-  if(k==='1')setTool('pen'); if(k==='2')setTool('marker'); if(k==='3')setTool('eraser');
-  if(k==='4')setTool('select'); if(k==='5')setTool('hand');
-  if(k==='t')setTool('text');
-  if(k==='k')setTool('arc');
-  if(k==='6')setTool('shape');
-  if(k==='r'){S.shapeKind='rect';setTool('shape');}
-  if(k==='o'){S.shapeKind='ellipse';setTool('shape');}
-  if(k==='l'){S.pathKind='line';setTool('path');}
-  if(k==='a'){S.pathKind='line';S.a2=2;setTool('path');}
-  if(k==='n'){S.pathKind='polyline';setTool('path');}
-  if(k==='c'){S.pathKind='curve';setTool('path');}
-  if(k==='m'){S.pathKind='polygon';setTool('path');}
-  if(k==='enter'&&pathDraft&&pathDraft.mode==='vertex'){e.preventDefault();commitPathDraft();}
-  if(k==='g')document.getElementById('gridBtn').click();
-  if(k==='0')document.getElementById('home').click();
-  if(k==='='||k==='+')zoomAt(board.clientWidth/2,board.clientHeight/2,1.25);
-  if(k==='-')zoomAt(board.clientWidth/2,board.clientHeight/2,0.8);
-  if((k==='delete'||k==='backspace')&&selection.length){e.preventDefault();document.getElementById('selDel').click();}
-  if(k==='escape'){abortDraft();select(null);shapesOpen(false);S.panelOpen=false;updatePenPanel();}
+  if(c==='BracketRight'&&selection.length){e.preventDefault();moveLayer('front');return;}
+  if(c==='BracketLeft'&&selection.length){e.preventDefault();moveLayer('back');return;}
+  if(c==='Escape'&&menuEl.classList.contains('show')){closeMenu();return;}
+  if(c==='Digit1')setTool('pen'); if(c==='Digit2')setTool('marker'); if(c==='Digit3')setTool('eraser');
+  if(c==='Digit4')setTool('select'); if(c==='Digit5')setTool('hand');
+  if(c==='KeyT')setTool('text');
+  if(c==='KeyK')setTool('arc');
+  if(c==='Digit6')setTool('shape');
+  if(c==='KeyR'){S.shapeKind='rect';setTool('shape');}
+  if(c==='KeyO'){S.shapeKind='ellipse';setTool('shape');}
+  if(c==='KeyL'){S.pathKind='line';setTool('path');}
+  if(c==='KeyA'){S.pathKind='line';S.a2=2;setTool('path');}
+  if(c==='KeyN'){S.pathKind='polyline';setTool('path');}
+  if(c==='KeyC'){S.pathKind='curve';setTool('path');}
+  if(c==='KeyM'){S.pathKind='polygon';setTool('path');}
+  if(c==='Enter'&&pathDraft&&pathDraft.mode==='vertex'){e.preventDefault();commitPathDraft();}
+  if(c==='KeyG')document.getElementById('gridBtn').click();
+  if(c==='Digit0')document.getElementById('home').click();
+  if(c==='Equal')zoomAt(board.clientWidth/2,board.clientHeight/2,1.25);
+  if(c==='Minus')zoomAt(board.clientWidth/2,board.clientHeight/2,0.8);
+  if((c==='Delete'||c==='Backspace')&&selection.length){e.preventDefault();document.getElementById('selDel').click();}
+  if(c==='Escape'){abortDraft();select(null);shapesOpen(false);S.panelOpen=false;updatePenPanel();}
 });
 addEventListener('keyup',e=>{if(e.code==='Space'){spaceDown=false;applyCursor();}});
 addEventListener('resize',()=>{resize();refreshSelBar();});
