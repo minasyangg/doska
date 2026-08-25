@@ -3186,9 +3186,11 @@ dockEl.addEventListener('click',e=>{
   if(e.target.closest('#dockPin')||e.target.closest('#shapesBtn'))return;
   if(e.target.closest('.tool'))setTimeout(()=>dockEl.classList.remove('peek'),180);
 });
-// тронули холст — тоже убираем
+// тронули холст — тоже убираем (и выехавший док, и открытую панель настроек
+// пера/фигуры: обе плавающие панели мешают одинаково, если их не убрать)
 stage.addEventListener('pointerdown',()=>{
   if(!S.dockPinned)dockEl.classList.remove('peek');
+  if(S.panelOpen){S.panelOpen=false;updatePenPanel();}
 },true);
 
 /* На телефоне панель по умолчанию спрятана: экран узкий, и столбец
