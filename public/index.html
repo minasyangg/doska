@@ -95,6 +95,8 @@
   .subtools::-webkit-scrollbar-thumb{background:var(--edge);border-radius:3px}
   .subtools .head{color:var(--muted);font-size:11px;letter-spacing:.04em;
     text-transform:uppercase;padding:8px 2px 4px}
+  /* пустой раздел доп.меню — заголовок уже есть, наполнения пока нет */
+  .subtools .soon{color:var(--muted);font-size:12px;padding:2px 2px 6px;font-style:italic}
   .subtools .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
   .subtools .tool{width:100%;height:40px;border-radius:8px}
   .subtools .tool svg{width:26px;height:26px}
@@ -655,6 +657,8 @@ const S={tool:'pen',size:4,color:PENS[0],penColor:PENS[0],markerColor:MARKERS[0]
   shapeKind:'rect',fill:null,dash:0,pathKind:'line',a1:0,a2:0,
   // выбран ли физический пресет (транспортир/линейка/вектор) для инструмента «линия»
   physicsPreset:null,
+  // какой объект-симуляцию ставит инструмент «physics» (магнит/компас/…)
+  physicsKind:null,
   // настройки инструмента открываются по требованию и закрыты при загрузке
   panelOpen:false};
 
@@ -747,12 +751,14 @@ function paintStroke(ctx,s){
 
 /* ═══ типовые реестры: новый тип объекта подключается сюда, не хирургией по всему файлу ═══ */
 // box-семейство — геометрия x,y,w,h(+rot); embed зарезервирован под будущий график (не реализован)
-const BOX_TYPES=new Set(['image','shape','embed','text']);
+// physics — объекты-симуляции (магнит/компас и т.п.): та же прямоугольная
+// геометрия, что у картинки, поэтому ручки ресайза/поворота уже работают
+const BOX_TYPES=new Set(['image','shape','embed','text','physics']);
 // back-слой — всегда рисуется под рукописным текстом, независимо от порядка добавления
 // (фигуры сюда не входят — они в общем z-порядке наравне со штрихами)
 const BACK_TYPES=new Set(['image','embed']);
 // кто сейчас реально выделяем инструментом "выделить"
-const SELECTABLE=new Set(['image','pen','marker','shape','path','text','arc']);
+const SELECTABLE=new Set(['image','pen','marker','shape','path','text','arc','physics']);
 /* Дуга циркуля живёт особняком: у неё нет ширины и высоты, только центр,
    радиус и два угла. Растянуть её нельзя — растянутая дуга перестаёт быть
    дугой окружности, — поэтому ручек размера у неё не будет, а будут ручки
@@ -1068,7 +1074,88 @@ function paintItem(ctx,it){
   if(it.type==='text'){paintText(ctx,it);return;}
   if(it.type==='arc'){paintArc(ctx,it);return;}
   if(it.type==='pen'||it.type==='marker'){paintStroke(ctx,it);return;}
+  if(it.type==='physics'){paintPhysics(ctx,it);return;}
   // неизвестные/будущие типы (conn/embed) — молча пропускаем, не роняем рендер
+}
+
+/* ═══ физические объекты-симуляции (раздел «Физика» в доп.меню) ═══
+   Один тип items ('physics'), разные kind. Свойства — в it.props (JSON),
+   геометрия — та же четвёрка x,y,w,h,rot, что у картинки, поэтому ручки
+   ресайза/поворота уже работают сами (BOX_TYPES). Никакого нового
+   анимационного цикла не заводим: paintPhysics вызывается из paintItem,
+   а тот — из обычного flushBoard(), которое и так перерисовывается на
+   каждое движение любого объекта (свой драг или чужой 'move') — значит
+   стрелка компаса всегда считается по самым свежим координатам магнитов. */
+const physicsAngleCache=new Map();          // id → последний посчитанный угол (только рендер, не грузится в сеть)
+/** Поле одного полюса в точке (px,py): убывает как 1/r², направлено от
+    полюса наружу (sign=+1 у north, -1 у south) — стандартное школьное
+    приближение поля стержневого магнита двумя точечными полюсами. */
+function poleField(px,py,pole,sign,strength){
+  const dx=px-pole.x,dy=py-pole.y,d2=Math.max(dx*dx+dy*dy,1);
+  const k=sign*strength*60000/d2, d=Math.sqrt(d2);
+  return {x:dx/d*k,y:dy/d*k};
+}
+/** Суммарное магнитное поле в мировой точке (px,py) от всех магнитов на
+    доске — суперпозиция вкладов, как и должно быть у нескольких магнитов
+    сразу. Плюс слабое фоновое поле «на север» (вверх), чтобы стрелка не
+    висела на нуле, когда рядом нет ни одного магнита — как у настоящего
+    компаса вдали от источников. */
+function fieldAt(px,py,excludeId){
+  let fx=0,fy=-6;                            // фон: слабо тянет «на север» (вверх)
+  for(const it of items){
+    if(it.type!=='physics'||it.kind!=='magnet'||it.id===excludeId)continue;
+    const cx=it.x+it.w/2,cy=it.y+it.h/2,rot=it.rot||0;
+    const half=it.w/2*0.72,dir={x:Math.cos(rot),y:Math.sin(rot)};
+    const strength=(it.props&&it.props.strength)||1;
+    const N={x:cx+dir.x*half,y:cy+dir.y*half}, S={x:cx-dir.x*half,y:cy-dir.y*half};
+    const fN=poleField(px,py,N,1,strength), fS=poleField(px,py,S,-1,strength);
+    fx+=fN.x+fS.x; fy+=fN.y+fS.y;
+  }
+  return {x:fx,y:fy};
+}
+/** Угол стрелки компаса — не хранимое поле объекта, а результат расчёта по
+    текущим координатам всех магнитов. Кэш — только чтобы не дёргать стрелку
+    в шум там, где поле почти нулевое (не персистится, не едет по сети). */
+function compassAngle(it){
+  const cx=it.x+it.w/2,cy=it.y+it.h/2;
+  const f=fieldAt(cx,cy,it.id);
+  const mag=Math.hypot(f.x,f.y);
+  if(mag<0.5)return physicsAngleCache.get(it.id)||0;
+  const ang=Math.atan2(f.y,f.x);
+  physicsAngleCache.set(it.id,ang);
+  return ang;
+}
+function paintPhysics(ctx,it){
+  const cx=it.x+it.w/2,cy=it.y+it.h/2,rot=it.rot||0;
+  if(it.kind==='magnet'){
+    ctx.save();ctx.translate(cx,cy);ctx.rotate(rot);
+    const w=it.w,h=it.h;
+    ctx.fillStyle='#D8433A';ctx.fillRect(-w/2,-h/2,w/2,h);
+    ctx.fillStyle='#2F6FE0';ctx.fillRect(0,-h/2,w/2,h);
+    ctx.strokeStyle='rgba(0,0,0,.25)';ctx.lineWidth=1.5;ctx.strokeRect(-w/2,-h/2,w,h);
+    ctx.fillStyle='#fff';ctx.font=Math.round(h*0.55)+'px ui-sans-serif,system-ui,sans-serif';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('N',-w/4,1);ctx.fillText('S',w/4,1);
+    ctx.restore();
+    return;
+  }
+  if(it.kind==='compass'){
+    const r=Math.min(it.w,it.h)/2;
+    ctx.save();ctx.translate(cx,cy);ctx.rotate(rot);
+    ctx.fillStyle='#F4F1E8';ctx.strokeStyle='rgba(0,0,0,.3)';ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.arc(0,0,r,0,6.2832);ctx.fill();ctx.stroke();
+    ctx.restore();
+    // стрелка — по направлению поля, независимо от того, как повёрнут корпус
+    const ang=compassAngle(it);
+    ctx.save();ctx.translate(cx,cy);ctx.rotate(ang);
+    ctx.fillStyle='#D8433A';
+    ctx.beginPath();ctx.moveTo(r*0.85,0);ctx.lineTo(0,-r*0.16);ctx.lineTo(0,r*0.16);ctx.closePath();ctx.fill();
+    ctx.fillStyle='#B7BCC2';
+    ctx.beginPath();ctx.moveTo(-r*0.85,0);ctx.lineTo(0,-r*0.16);ctx.lineTo(0,r*0.16);ctx.closePath();ctx.fill();
+    ctx.fillStyle='#1A1C20';ctx.beginPath();ctx.arc(0,0,r*0.1,0,6.2832);ctx.fill();
+    ctx.restore();
+    return;
+  }
 }
 
 /** Дуга циркуля: центр, радиус, два угла. Заливки у неё нет — циркуль ничего
@@ -1840,6 +1927,9 @@ const DEFLATE={
   arc:it=>({id:it.id,type:'arc',cx:+it.cx.toFixed(1),cy:+it.cy.toFixed(1),r:+it.r.toFixed(1),
             a0:+it.a0.toFixed(4),a1:+it.a1.toFixed(4),color:it.color,
             size:+it.size.toFixed(3),dash:it.dash||0,g:it.g||null,locked:!!it.locked}),
+  physics:it=>({id:it.id,type:'physics',kind:it.kind,x:+it.x.toFixed(1),y:+it.y.toFixed(1),
+                w:+it.w.toFixed(1),h:+it.h.toFixed(1),rot:+((it.rot||0).toFixed(4)),
+                props:it.props||{},g:it.g||null,locked:!!it.locked}),
   text:it=>({id:it.id,type:'text',text:it.text,x:+it.x.toFixed(1),y:+it.y.toFixed(1),
              w:+it.w.toFixed(1),rot:+((it.rot||0).toFixed(4)),color:it.color,
              size:+(+it.size).toFixed(2),bold:!!it.bold,italic:!!it.italic,
@@ -1859,6 +1949,7 @@ const INFLATE={
   shape:raw=>({...raw,rot:raw.rot||0,dash:raw.dash||0,fill:raw.fill||null,g:raw.g||null,locked:!!raw.locked,bbox:null}),
   arc:raw=>({...raw,r:raw.r||1,a0:raw.a0||0,a1:raw.a1||0,dash:raw.dash||0,
              g:raw.g||null,locked:!!raw.locked,bbox:null}),
+  physics:raw=>({...raw,rot:raw.rot||0,props:raw.props||{},g:raw.g||null,locked:!!raw.locked,bbox:null}),
   text:raw=>({...raw,rot:raw.rot||0,w:raw.w||240,size:raw.size||24,
               bold:!!raw.bold,italic:!!raw.italic,g:raw.g||null,locked:!!raw.locked,bbox:null}),
   path:raw=>({...raw,pts:raw.pts.map(a=>({x:a[0],y:a[1]})),closed:!!raw.closed,
@@ -2185,6 +2276,11 @@ stage.addEventListener('pointerdown',e=>{
     drawLive();return;
   }
 
+  if(S.tool==='physics'){
+    placePhysics(S.physicsKind,w);
+    return;
+  }
+
   if(S.tool==='path'){
     if(S.pathKind==='line'){
       pathDraft={kind:'line',pts:[w,w],mode:'drag'};
@@ -2408,6 +2504,7 @@ stage.addEventListener('pointermove',e=>{
    копия pts — иначе before/after будут ссылаться на один и тот же массив. */
 const GEOM_KEYS={
   image:['x','y','w','h','rot','locked'],
+  physics:['x','y','w','h','rot','locked'],
   shape:['x','y','w','h','rot','color','size','dash','fill','locked'],
   path:['pts','color','size','dash','fill','a1','a2','locked'],
   // высоты у надписи нет: она считается из числа строк
@@ -2859,6 +2956,24 @@ async function placeImage(blob,screenPt){
   }catch(err){hint('Не получилось: '+err.message);}
 }
 
+/* Объект-симуляция ставится кликом, как штамп — без загрузки файла, размер
+   фиксирован под конкретный вид. Дальше это обычный box-объект: тянется,
+   вращается, ресайзится теми же ручками, что и картинка. */
+const PHYSICS_SIZE={magnet:{w:96,h:34},compass:{w:64,h:64}};
+const PHYSICS_TITLE={magnet:'Магнит',compass:'Компас'};
+function placePhysics(kind,w){
+  if(!canEdit())return hint('Преподаватель закрыл доску для правок');
+  const size=PHYSICS_SIZE[kind]||{w:60,h:60};
+  const it={id:newId(),by:S.me&&S.me.uid,type:'physics',kind,
+            x:w.x-size.w/2,y:w.y-size.h/2,w:size.w,h:size.h,rot:0,locked:false,
+            props:kind==='magnet'?{strength:1}:{}};
+  addItem(it);
+  undoStack.push({type:'add',item:it});redoStack.length=0;
+  net.send({t:'add',item:deflate(it)});
+  setTool('select');select(it);
+  hint((PHYSICS_TITLE[kind]||'Объект')+' поставлен: тяните и вращайте как обычно');
+}
+
 addEventListener('paste',async e=>{
   if(!S.boardId)return;                       // состояние роутера, а не вид DOM
   if(e.target&&/INPUT|TEXTAREA/.test(e.target.tagName))return;
@@ -3060,20 +3175,40 @@ function buildPenMenu(){
     '<button class="tool" data-pen="marker" title="Маркер (2) · правая кнопка — настройки"><svg viewBox="0 0 24 24"><path d="M9 15l-3 3v2h4l3-3"/><path d="M12 17L7 12l8-8a2.8 2.8 0 0 1 4 4l-7 9z"/></svg></button>'+
     '</div>';
 }
-/* Доп. инструменты по предмету — сейчас только физика, дальше можно дописать
-   другие предметы новыми ключами. Показывается всегда: доска пока не
-   привязывает список к своему предмету. Каждый пункт — это заранее
-   настроенный инструмент «линия» (S.pathKind + S.physicsPreset), готового
-   типа объекта на сервере под них заводить не пришлось: см. applyPhysicsLabel. */
+/* Доп. инструменты — каталог по школьным разделам физики (дальше можно
+   дописать другие предметы новыми верхнеуровневыми ключами). Показывается
+   всегда: доска пока не привязывает список к своему предмету. Разделы без
+   наполнения всё равно рисуются — с заглушкой «скоро» — чтобы было видно,
+   что структура уже есть, а не появилась только там, где что-то готово.
+
+   У каждого пункта — mode:
+   'preset'  — заранее настроенный инструмент «линия» (S.pathKind +
+               S.physicsPreset), см. applyPhysicsLabel; готового типа
+               объекта на сервере под них заводить не пришлось.
+   'physics' — настоящий объект-симуляция (тип items 'physics', поле kind):
+               ставится на доску кликом, как штамп, дальше двигается/
+               крутится/ресайзится как картинка, а его физику на каждый
+               кадр пересчитывает paintPhysics()/compassAngle() из текущих
+               координат — см. эти функции ниже. */
 const EXTRA_TOOLS={
-  physics:{title:'Физика',tools:[
-    {id:'protractor',title:'Транспортир — угол между двумя отрезками',
+  general:{title:'Общие инструменты',tools:[
+    {id:'protractor',mode:'preset',title:'Транспортир — угол между двумя отрезками',
       icon:'<svg viewBox="0 0 24 24"><path d="M4 20L20 20"/><path d="M4 20L18 8"/><path d="M4 20L20 15"/></svg>'},
-    {id:'ruler',title:'Линейка — длина отрезка',
+    {id:'ruler',mode:'preset',title:'Линейка — длина отрезка',
       icon:'<svg viewBox="0 0 24 24"><rect x="3" y="9" width="18" height="6" rx="1"/><path d="M7 9v3M11 9v2M15 9v3"/></svg>'},
-    {id:'vector',title:'Вектор — стрелка с подписью величины',
+    {id:'vector',mode:'preset',title:'Вектор — стрелка с подписью величины',
       icon:'<svg viewBox="0 0 24 24"><path d="M4 20L18 6"/><path d="M18 6l-5 1M18 6l-1 5"/></svg>'},
   ]},
+  mechanics:{title:'Механика',tools:[]},
+  thermal:{title:'Тепловые явления',tools:[]},
+  electromagnetism:{title:'Электромагнетизм',tools:[
+    {id:'magnet',mode:'physics',physicsKind:'magnet',title:'Магнит — поставьте на доску',
+      icon:'<svg viewBox="0 0 24 24"><rect x="3" y="8" width="8" height="8" rx="1" fill="#D8433A" stroke="none"/><rect x="13" y="8" width="8" height="8" rx="1" fill="#2F6FE0" stroke="none"/></svg>'},
+    {id:'compass',mode:'physics',physicsKind:'compass',title:'Компас — реагирует на ближайший магнит',
+      icon:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 5l2.4 6.6L12 19l-2.4-6.6z" fill="currentColor" stroke="none"/></svg>'},
+  ]},
+  optics:{title:'Оптика',tools:[]},
+  nuclear:{title:'Ядерная и атомная физика',tools:[]},
 };
 function findExtraTool(id){
   for(const key in EXTRA_TOOLS)for(const t of EXTRA_TOOLS[key].tools)if(t.id===id)return t;
@@ -3083,7 +3218,12 @@ function buildMoreMenu(){
   let html='';
   for(const key in EXTRA_TOOLS){
     const sec=EXTRA_TOOLS[key];
-    html+='<div class="head">'+sec.title+'</div><div class="grid" style="grid-template-columns:repeat(3,1fr)">';
+    html+='<div class="head">'+sec.title+'</div>';
+    if(!sec.tools.length){
+      html+='<div class="soon">скоро</div>';
+      continue;
+    }
+    html+='<div class="grid" style="grid-template-columns:repeat(3,1fr)">';
     for(const t of sec.tools)
       html+='<button class="tool" data-extra="'+t.id+'" title="'+t.title+' · правая кнопка — закрепить на панели">'+t.icon+'</button>';
     html+='</div>';
@@ -3121,9 +3261,13 @@ function toggleExtraPin(id){
 /** Пресеты физики — обычная «линия»/«ломаная», просто с готовой настройкой и
     подписью-результатом после рисования (см. applyPhysicsLabel в commitPath):
     новый тип объекта на сервере не заводим, линия и текст уже полностью
-    поддержаны (сохранение, отмена, синхронизация). */
+    поддержаны (сохранение, отмена, синхронизация). Объекты-симуляции
+    (mode:'physics') — настоящий новый тип items, см. placePhysics(). */
 function applyExtraTool(id){
-  if(id==='protractor'){S.pathKind='polyline';S.physicsPreset='protractor';setTool('path');}
+  const t=findExtraTool(id);
+  if(!t){moreOpen(false);return;}
+  if(t.mode==='physics'){S.physicsKind=t.physicsKind;setTool('physics');}
+  else if(id==='protractor'){S.pathKind='polyline';S.physicsPreset='protractor';setTool('path');}
   else if(id==='ruler'){S.pathKind='line';S.physicsPreset='ruler';setTool('path');}
   else if(id==='vector'){S.pathKind='line';S.a2=4;S.physicsPreset='vector';setTool('path');}
   moreOpen(false);

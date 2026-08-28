@@ -948,7 +948,9 @@ function cleanShape(s, by) {
            locked: !!s.locked,
            ...cleanStyle(s) };
 }
-const clampArrow = v => [0, 1, 2, 3].includes(+v) ? +v : 0;
+// 4 — узкое остриё «вектора» в физике (см. drawArrowhead в index.html), не выбирается
+// руками из обычного списка стрелок, но клиент присылает его для этого пресета
+const clampArrow = v => [0, 1, 2, 3, 4].includes(+v) ? +v : 0;
 function cleanPath(p, by) {
   if (!['line', 'polyline', 'curve', 'polygon'].includes(p.kind)) return null;
   if (!Array.isArray(p.pts)) return null;
@@ -963,10 +965,39 @@ function cleanPath(p, by) {
            ...cleanStyle(p) };
 }
 
+/* Объекты-симуляции доп.меню «Физика» (магнит/компас и т.п.). Геометрия —
+   как у картинки (x,y,w,h,rot), но размер зажат под иконку-объект, а не под
+   загруженный файл: это не фото, а маленький штамп с фиксированными
+   пропорциями. props — физические параметры конкретного kind; известные
+   поля белого списка не пропускаем дальше — вся содержательная физика
+   (поле магнита, стрелка компаса) всё равно считается на клиенте по одним
+   этим координатам, серверу знать её не нужно. */
+const PHYSICS_KINDS = new Set(['magnet', 'compass']);
+function cleanPhysicsProps(kind, props) {
+  const p = props && typeof props === 'object' ? props : {};
+  if (kind === 'magnet') {
+    const s = Number.isFinite(+p.strength) ? +p.strength : 1;
+    return { strength: Math.max(0.2, Math.min(3, s)) };
+  }
+  return {};
+}
+function cleanPhysics(o, by) {
+  if (!PHYSICS_KINDS.has(o.kind)) return null;
+  const num = (v, d) => Number.isFinite(+v) ? +v : d;
+  return { id: String(o.id).slice(0, 48), by, type: 'physics', kind: o.kind,
+           x: num(o.x, 0), y: num(o.y, 0),
+           w: Math.max(16, Math.min(400, num(o.w, 60))),
+           h: Math.max(16, Math.min(400, num(o.h, 60))),
+           rot: num(o.rot, 0),
+           props: cleanPhysicsProps(o.kind, o.props),
+           g: clampGroup(o.g),
+           locked: !!o.locked };
+}
+
 /* реестр валидаторов по типу — новый тип регистрируется здесь один раз,
    вместо тернарника в add/restore. Незарегистрированный тип (штрихи,
    а также будущие типы до появления своего cleaner'а) идёт через cleanStroke. */
-const CLEANERS = { image: cleanImage, shape: cleanShape, path: cleanPath, text: cleanText, arc: cleanArc };
+const CLEANERS = { image: cleanImage, shape: cleanShape, path: cleanPath, text: cleanText, arc: cleanArc, physics: cleanPhysics };
 const pick = type => CLEANERS[type] || cleanStroke;
 
 /* PATCHABLE[type] — какие поля можно менять через 'move'; PATCH_CLAMP[type][key] —
@@ -1009,6 +1040,18 @@ const PATCH_CLAMP = {
     y: (v, it) => Number.isFinite(+v) ? +v : it.y,
     w: (v, it) => Math.max(4, Math.min(40000, Number.isFinite(+v) ? +v : it.w)),
     h: (v, it) => Math.max(4, Math.min(40000, Number.isFinite(+v) ? +v : it.h)),
+    rot: (v, it) => Number.isFinite(+v) ? +v : it.rot,
+    locked: (v) => !!v
+  },
+  // kind и props не патчатся: вид объекта и его физические параметры (сила
+  // магнита) задаются один раз при постановке — редактор свойств сделаем
+  // отдельным шагом, когда он понадобится
+  physics: {
+    g: clampG,
+    x: (v, it) => Number.isFinite(+v) ? +v : it.x,
+    y: (v, it) => Number.isFinite(+v) ? +v : it.y,
+    w: (v, it) => Math.max(16, Math.min(400, Number.isFinite(+v) ? +v : it.w)),
+    h: (v, it) => Math.max(16, Math.min(400, Number.isFinite(+v) ? +v : it.h)),
     rot: (v, it) => Number.isFinite(+v) ? +v : it.rot,
     locked: (v) => !!v
   },
@@ -1057,8 +1100,8 @@ const PATCH_CLAMP = {
     size: (v, it) => Number.isFinite(+v) ? Math.min(600, Math.max(0.1, +v)) : it.size,
     dash: (v, it) => [0, 1, 2].includes(+v) ? +v : it.dash,
     fill: (v, it) => v === null ? null : (typeof v === 'string' ? v.slice(0, 24) : it.fill),
-    a1: (v, it) => [0, 1, 2, 3].includes(+v) ? +v : it.a1,
-    a2: (v, it) => [0, 1, 2, 3].includes(+v) ? +v : it.a2,
+    a1: (v, it) => [0, 1, 2, 3, 4].includes(+v) ? +v : it.a1,
+    a2: (v, it) => [0, 1, 2, 3, 4].includes(+v) ? +v : it.a2,
     locked: (v) => !!v
   }
 };
