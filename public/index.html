@@ -2002,9 +2002,19 @@ stage.addEventListener('pointerdown',e=>{
   // событие) и бросает NotFoundError. Без try весь обработчик обрывался бы
   // на первой строке, и жест пропадал целиком.
   try{stage.setPointerCapture(e.pointerId);}catch{}
-  pointers.set(e.pointerId,localXY(e));
-  if(e.pointerType==='pen')lastPen=performance.now();
-  if(e.pointerType==='touch'&&performance.now()-lastPen<900)return;
+  // Указатель иногда «теряется»: capture выше не удался (см. коммент к try),
+  // либо кнопку отпустили за пределами окна/вкладки — тогда ни pointerup, ни
+  // pointercancel не приходят, и старая запись в pointers навсегда виснет.
+  // Настоящий пинч — это две точки, шевелящиеся ОДНОВРЕМЕННО; у зависшей
+  // координата не обновлялась уже давно. Чистим такие перед тем, как решать,
+  // пинч это или нет — иначе следующий обычный клик мышью попадёт в
+  // pointers.size===2 вместе с координатой из давно завершённого жеста, и
+  // зум/панорама прыгнут туда, а не к месту клика (см. zoomAt/pinch ниже).
+  const now=performance.now();
+  for(const[id,p]of pointers)if(id!==e.pointerId&&now-p.t>250)pointers.delete(id);
+  pointers.set(e.pointerId,{...localXY(e),t:now});
+  if(e.pointerType==='pen')lastPen=now;
+  if(e.pointerType==='touch'&&now-lastPen<900)return;
 
   if(pointers.size===2){
     abortStroke();abortDraft();
@@ -2154,7 +2164,7 @@ stage.addEventListener('pointerdown',e=>{
 let tStream=0;
 stage.addEventListener('pointermove',e=>{
   const pt=localXY(e);
-  if(pointers.has(e.pointerId))pointers.set(e.pointerId,pt);
+  if(pointers.has(e.pointerId))pointers.set(e.pointerId,{...pt,t:performance.now()});
   hoverPt=pt;                                  // нужна и ластику, и вставке скрина
   if(S.tool==='eraser')drawLive();
   // резиновая линия к курсору в режиме расстановки вершин — работает и без
