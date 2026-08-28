@@ -47,9 +47,9 @@
   .edge.show{display:grid}
   .edge:hover{opacity:1;width:18px}
   .edge::after{content:'';width:3px;height:34px;border-radius:2px;background:var(--muted)}
-  /* кнопка «закрепить/убрать» — первая в панели, чтобы её было легко найти */
-  .tool.pin{color:var(--muted)}
-  .tool.pin.off{color:var(--text)}
+  /* кнопка «закрепить/убрать» живёт в верхнем правом углу вместе с доступом */
+  .mini.pin{color:var(--muted)}
+  .mini.pin.off{color:var(--text)}
   /* flex:none обязателен: в колонке с ограниченной высотой флекс поджимал
      кнопки, и на невысоком экране они выходили 23 px — мимо пальца. Пусть
      лучше панель прокручивается, чем мельчает. */
@@ -76,6 +76,10 @@
   .tool[disabled]{opacity:.3;cursor:default}
   .tool svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
   .sep{height:1px;background:var(--edge);margin:3px 4px}
+  /* закреплённые доп.инструменты — та же колонка, что и остальной док;
+     пустой контейнер прячем совсем, иначе он оставлял бы лишний зазор */
+  #pinnedTools{display:flex;flex-direction:column;gap:6px}
+  #pinnedTools:empty{display:none}
   /* выпадашка фигур живёт внутри самой панели инструментов: так она никогда
      не перекроет панель настроек слева и не требует расчёта координат */
   /* Фигур много, поэтому список вынесен рядом с панелью и разложен по
@@ -158,9 +162,14 @@
   /* зум — справа снизу, как просили */
   .zoombar{position:fixed;right:14px;bottom:14px;z-index:10}
   #zoom{font:12px/1 ui-monospace,SFMono-Regular,Menlo,monospace;min-width:54px;text-align:center;color:var(--text)}
+  /* Отменить/Вернуть/Очистить — отдельно от колонки инструментов, в левом
+     нижнем углу: так они на месте независимо от того, закреплена панель
+     инструментов или укатилась к краю. */
+  #cornerTools{position:fixed;left:14px;bottom:14px;z-index:10}
   /* Цвет подсказки — не серее #62666C: на светлой подложке при 11.5 px это
-     ровно порог читаемости (4.5:1). Прежний #71767D давал 4.2 и не дотягивал. */
-  .hint{position:fixed;left:14px;bottom:14px;z-index:10;color:#5F646A;font-size:11.5px;
+     ровно порог читаемости (4.5:1). Прежний #71767D давал 4.2 и не дотягивал.
+     Строка стоит выше уголка с undo/redo/очисткой, чтобы не перекрываться. */
+  .hint{position:fixed;left:14px;bottom:64px;z-index:10;color:#5F646A;font-size:11.5px;
     background:rgba(247,245,240,.86);backdrop-filter:blur(6px);padding:7px 11px;border-radius:9px;
     border:1px solid rgba(0,0,0,.06);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;max-width:52vw}
   .selbar{position:fixed;z-index:11;display:none}
@@ -304,6 +313,7 @@
     .dock.away:hover,.dock.away:focus-within,.dock.away.peek{transform:translateY(0)}
     /* разделители в строке становятся вертикальными */
     .sep{width:1px;height:22px;margin:0 3px;flex:none}
+    #pinnedTools{flex-direction:row;gap:3px}
     /* язычок переезжает вниз по центру */
     .edge{left:50%;right:auto;top:auto;bottom:0;transform:translateX(-50%);
           width:112px;height:14px;border-radius:10px 10px 0 0;
@@ -321,9 +331,11 @@
          max-height:52vh;overflow-y:auto}
     .hint{display:none}
     .wrap{padding:26px 16px 70px}
-    /* масштаб уходит наверх, чтобы не спорить с полосой инструментов */
+    /* масштаб уходит наверх, чтобы не спорить с полосой инструментов —
+       уголок отмены/очистки по той же причине уезжает туда же, но слева */
     .zoombar{right:8px;bottom:auto;top:56px}
     .zoombar .card{padding:3px}
+    #cornerTools{left:8px;bottom:auto;top:56px;padding:3px}
     /* Мельче тридцати точек не делаем даже ради компактности: в такую кнопку
        пальцем не попасть. Ужимаем только подпись и отступы. */
     .zoombar .mini{height:30px;min-width:30px;padding:0 6px;font-size:11px}
@@ -402,28 +414,29 @@
 <div class="edge" id="dockEdge" title="Показать инструменты"></div>
 
 <aside class="dock hidden" id="dock">
-  <button class="tool pin" id="dockPin" title="Открепить панель — будет прятаться у края">
-    <svg viewBox="0 0 24 24"><path d="M15 3l6 6-3 1-4 4-1 5-6-6 5-1 4-4z"/><path d="M7 17l-4 4"/></svg>
-  </button>
-  <div class="sep"></div>
-  <button class="tool on" data-tool="pen" title="Карандаш (1) · правая кнопка — настройки"><svg viewBox="0 0 24 24"><path d="M4 20l4-1 10-10a2.5 2.5 0 0 0-3.5-3.5L4.5 15.5 4 20z"/><path d="M13.5 6.5l4 4"/></svg></button>
-  <button class="tool" data-tool="marker" title="Маркер (2) · правая кнопка — настройки"><svg viewBox="0 0 24 24"><path d="M9 15l-3 3v2h4l3-3"/><path d="M12 17L7 12l8-8a2.8 2.8 0 0 1 4 4l-7 9z"/></svg></button>
-  <button class="tool" data-tool="eraser" title="Ластик (3)"><svg viewBox="0 0 24 24"><path d="M8 20h12"/><path d="M15.5 4.5l4 4a2 2 0 0 1 0 2.8L12 19H8l-3.5-3.5a2 2 0 0 1 0-2.8l8.2-8.2a2 2 0 0 1 2.8 0z"/></svg></button>
-  <button class="tool" data-tool="arc" title="Циркуль (K) · поставьте ножку и обведите"><svg viewBox="0 0 24 24"><path d="M12 3v3"/><path d="M12 6L6 21"/><path d="M12 6l6 15"/><path d="M4.5 16a10 10 0 0 0 15 0"/></svg></button>
-  <button class="tool" data-tool="text" title="Надпись (T) · щёлкните по доске и печатайте"><svg viewBox="0 0 24 24"><path d="M5 6h14M12 6v13M9 19h6"/></svg></button>
+  <button class="tool on" id="penBtn" title="Карандаш (1/2) · клик — выбор стержня, правая кнопка — настройки"><svg viewBox="0 0 24 24"><path d="M4 20l4-1 10-10a2.5 2.5 0 0 0-3.5-3.5L4.5 15.5 4 20z"/><path d="M13.5 6.5l4 4"/></svg></button>
   <button class="tool" data-tool="select" title="Выделить (4) · тяните рамку по пустому месту"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.5L10.5 19 5 3z"/></svg></button>
+  <button class="tool" data-tool="eraser" title="Ластик (3)"><svg viewBox="0 0 24 24"><path d="M8 20h12"/><path d="M15.5 4.5l4 4a2 2 0 0 1 0 2.8L12 19H8l-3.5-3.5a2 2 0 0 1 0-2.8l8.2-8.2a2 2 0 0 1 2.8 0z"/></svg></button>
   <button class="tool" data-tool="hand" title="Рука (5 / пробел)"><svg viewBox="0 0 24 24"><path d="M8 12V5.5a1.5 1.5 0 0 1 3 0V11m0-.5V4.5a1.5 1.5 0 0 1 3 0V11m0-.5v-1a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-2.7L4.6 15a1.6 1.6 0 0 1 2.6-1.8L8 14.5"/></svg></button>
-  <button class="tool" id="shapesBtn" aria-expanded="false" title="Фигуры и линии (6) — нажмите, чтобы выбрать"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1.5"/></svg></button>
-  <div class="sep"></div>
-  <button class="tool" id="undo" title="Отменить (Ctrl+Z)"><svg viewBox="0 0 24 24"><path d="M4 10h10a5 5 0 0 1 0 10h-4"/><path d="M8 6l-4 4 4 4"/></svg></button>
-  <button class="tool" id="redo" title="Вернуть (Ctrl+Shift+Z)"><svg viewBox="0 0 24 24"><path d="M20 10H10a5 5 0 0 0 0 10h4"/><path d="M16 6l4 4-4 4"/></svg></button>
+  <button class="tool" data-tool="text" title="Надпись (T) · щёлкните по доске и печатайте"><svg viewBox="0 0 24 24"><path d="M5 6h14M12 6v13M9 19h6"/></svg></button>
+  <button class="tool" id="shapesBtn" aria-expanded="false" title="Фигуры (6) — нажмите, чтобы выбрать"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1.5"/></svg></button>
+  <button class="tool" id="pathBtn" aria-expanded="false" title="Линии (L/N/C/M) — нажмите, чтобы выбрать"><svg viewBox="0 0 24 24"><path d="M4 20L20 4"/></svg></button>
+  <button class="tool" data-tool="arc" title="Циркуль (K) · поставьте ножку и обведите"><svg viewBox="0 0 24 24"><path d="M12 3v3"/><path d="M12 6L6 21"/><path d="M12 6l6 15"/><path d="M4.5 16a10 10 0 0 0 15 0"/></svg></button>
   <div class="sep"></div>
   <button class="tool" id="gridBtn" title="Сетка (G)"><svg viewBox="0 0 24 24"><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg></button>
-  <button class="tool" id="png" title="Сохранить картинкой"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M21 16l-5-5-6 6-2-2-5 5"/></svg></button>
-  <button class="tool" id="wipe" title="Очистить доску"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M6 7l1 13h10l1-13"/></svg></button>
+  <div id="pinnedTools"></div>
+  <button class="tool" id="moreBtn" aria-expanded="false" title="Ещё инструменты"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button>
   <div class="sep"></div>
   <button class="tool" id="toDash" title="К списку досок"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/></svg></button>
 </aside>
+
+<!-- Отменить/Вернуть/Очистить доску — фиксированы в левом нижнем углу, отдельно
+     от колонки инструментов: так они на месте и когда панель откреплена. -->
+<div class="card hidden" id="cornerTools">
+  <button class="mini ic" id="undo" title="Отменить (Ctrl+Z)"><svg viewBox="0 0 24 24"><path d="M4 10h10a5 5 0 0 1 0 10h-4"/><path d="M8 6l-4 4 4 4"/></svg></button>
+  <button class="mini ic" id="redo" title="Вернуть (Ctrl+Shift+Z)"><svg viewBox="0 0 24 24"><path d="M20 10H10a5 5 0 0 0 0 10h4"/><path d="M16 6l4 4-4 4"/></svg></button>
+  <button class="mini ic" id="wipe" title="Очистить доску"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M6 7l1 13h10l1-13"/></svg></button>
+</div>
 
 <div class="pen hidden" id="penPanel">
   <div style="display:flex;align-items:center;gap:6px">
@@ -500,6 +513,13 @@
     <button class="mini ic" id="callAll" hidden title="Показать всем это место">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7.5"/><path d="M12 1.5v3M12 19.5v3M22.5 12h-3M4.5 12h-3"/></svg>
     </button>
+    <span class="sepv"></span>
+    <button class="mini ic" id="png" title="Сохранить картинкой">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M21 16l-5-5-6 6-2-2-5 5"/></svg>
+    </button>
+    <button class="mini ic pin" id="dockPin" title="Открепить панель — будет прятаться у края">
+      <svg viewBox="0 0 24 24"><path d="M15 3l6 6-3 1-4 4-1 5-6-6 5-1 4-4z"/><path d="M7 17l-4 4"/></svg>
+    </button>
   </div>
   <div class="card ro" id="readonly" hidden>Только просмотр</div>
 </div>
@@ -540,6 +560,13 @@
      панели инструментов: у той свой transform, и он делал бы её рамкой для
      этого списка, обрезая его по высоте. -->
 <div class="subtools hidden" id="shapesMenu"></div>
+<!-- Тот же приём — гель/маркер и линии/кривые собираются в коде и живут вне
+     панели по той же причине, что и список фигур выше. -->
+<div class="subtools hidden" id="penKindMenu"></div>
+<div class="subtools hidden" id="pathMenu"></div>
+<!-- Доп. инструменты (по предмету) и то, что из них закреплено в основной
+     панели — из одного каталога EXTRA_TOOLS, чтобы список не разъезжался. -->
+<div class="subtools hidden" id="moreMenu"></div>
 
 <div class="menu card" id="menu"></div>
 
@@ -612,6 +639,8 @@ const S={tool:'pen',size:4,color:PENS[0],penColor:PENS[0],markerColor:MARKERS[0]
   locked:false,cap:'none',anyEdit:false,me:null,you:null,following:false,
   boardId:null,name:store.get('doska.name')||'',
   shapeKind:'rect',fill:null,dash:0,pathKind:'line',a1:0,a2:0,
+  // выбран ли физический пресет (транспортир/линейка/вектор) для инструмента «линия»
+  physicsPreset:null,
   // настройки инструмента открываются по требованию и закрыты при загрузке
   panelOpen:false};
 
@@ -2633,15 +2662,52 @@ function commitPath(kind,pts){
             fill:kind==='polygon'?S.fill:null,
             a1:S.a1||0,a2:S.a2||0,locked:false,bbox:null};
   addItem(it);
-  undoStack.push({type:'add',item:it});redoStack.length=0;
   net.send({t:'add',item:deflate(it)});
+  const ops=[{type:'add',item:it}];
+  const label=applyPhysicsLabel(kind,pts);         // транспортир/линейка — подпись рядом
+  if(label)ops.push(label);
+  undoStack.push(ops.length===1?ops[0]:{type:'batch',ops});redoStack.length=0;
 }
 function commitPathDraft(){
   if(!pathDraft)return;
   const d=pathDraft;pathDraft=null;
-  const minPts=d.kind==='polygon'?3:2;
+  let minPts=d.kind==='polygon'?3:2;
+  if(S.physicsPreset==='protractor')minPts=3;     // транспортиру нужна вершина и два луча
   if(d.pts.length>=minPts)commitPath(d.kind,d.pts);
   drawLive();
+}
+/* Физические пресеты (транспортир/линейка/вектор) — не отдельный тип объекта
+   на сервере, а обычная «линия»/«ломаная» плюс текстовая подпись рядом:
+   персист/отмена/синхронизация у обоих типов уже есть, заводить третий не
+   пришлось. Возвращает undo-операцию для подписи (кроме вектора — там
+   значение вписывает сам преподаватель, это отдельное, более позднее
+   действие со своей записью в истории). */
+function applyPhysicsLabel(kind,pts){
+  const preset=S.physicsPreset;
+  if(!preset)return null;
+  if(preset==='protractor'&&kind==='polyline'&&pts.length>=3){
+    const b=pts[pts.length-1],v=pts[pts.length-2],a=pts[pts.length-3];
+    const a1=Math.atan2(a.y-v.y,a.x-v.x),a2=Math.atan2(b.y-v.y,b.x-v.x);
+    let deg=Math.abs(a1-a2)*180/Math.PI;if(deg>180)deg=360-deg;
+    return addTextLabel(v,Math.round(deg)+'°');
+  }
+  if(preset==='ruler'&&kind==='line'&&pts.length===2){
+    const len=Math.round(Math.hypot(pts[1].x-pts[0].x,pts[1].y-pts[0].y));
+    const mid={x:(pts[0].x+pts[1].x)/2,y:(pts[0].y+pts[1].y)/2};
+    return addTextLabel(mid,'≈ '+len+' px');
+  }
+  if(preset==='vector'&&kind==='line'&&pts.length===2){
+    openTextEditor(pts[1],null);          // сразу просим подписать величину
+  }
+  return null;
+}
+function addTextLabel(at,text){
+  const it={id:newId(),by:S.me&&S.me.uid,type:'text',text,
+            x:at.x,y:at.y,w:140,rot:0,color:S.color,size:Math.max(14,S.size*3),
+            bold:false,italic:false,g:null,locked:false,bbox:null};
+  addItem(it);
+  net.send({t:'add',item:deflate(it)});
+  return {type:'add',item:it};
 }
 
 function eraseAt(pt){
@@ -2887,6 +2953,9 @@ document.querySelectorAll('[data-dash]').forEach(b=>{
    Значок показывает последнюю выбранную фигуру, нажатие открывает список.
    Горячие клавиши R/O/L/N/C/M работают напрямую, минуя список. */
 const shapesBtn=document.getElementById('shapesBtn'), shapesMenu=document.getElementById('shapesMenu');
+const pathBtn=document.getElementById('pathBtn'), pathMenu=document.getElementById('pathMenu');
+const penBtn=document.getElementById('penBtn'), penKindMenu=document.getElementById('penKindMenu');
+const moreBtn=document.getElementById('moreBtn'), moreMenu=document.getElementById('moreMenu');
 /* Значок фигуры — та же таблица, что и сама фигура, только в svg. Рисовать
    иконки руками значило бы держать второе описание каждой формы. */
 function shapeIcon(kind){
@@ -2933,39 +3002,145 @@ function buildShapesMenu(){
     }
     html+='</div>';
   }
-  html+='<div class="head">Линии и кривые</div><div class="grid">'+
+  box.innerHTML=html;
+}
+
+/** Линии и кривые — раньше жили внутри списка фигур, теперь свой инструмент. */
+function buildPathMenu(){
+  pathMenu.innerHTML='<div class="head">Линии и кривые</div><div class="grid">'+
     '<button class="tool" data-path="line" title="Линия (L), стрелка — A"><svg viewBox="0 0 24 24"><path d="M4 20L20 4"/></svg></button>'+
     '<button class="tool" data-path="polyline" title="Ломаная (N)"><svg viewBox="0 0 24 24"><path d="M4 18l6-10 4 6 6-10"/></svg></button>'+
     '<button class="tool" data-path="curve" title="Кривая (C)"><svg viewBox="0 0 24 24"><path d="M4 18Q10 4 12 12T20 6"/></svg></button>'+
     '<button class="tool" data-path="polygon" title="Многоугольник (M)"><svg viewBox="0 0 24 24"><path d="M12 3l8 6-3 10H7L4 9z"/></svg></button>'+
     '</div>';
-  box.innerHTML=html;
+}
+/** Гель/маркер — раньше две отдельные кнопки дока, теперь один «Карандаш». */
+function buildPenMenu(){
+  penKindMenu.innerHTML='<div class="head">Карандаш</div><div class="grid" style="grid-template-columns:repeat(2,1fr)">'+
+    '<button class="tool" data-pen="pen" title="Гелевая ручка (1) · правая кнопка — настройки"><svg viewBox="0 0 24 24"><path d="M4 20l4-1 10-10a2.5 2.5 0 0 0-3.5-3.5L4.5 15.5 4 20z"/><path d="M13.5 6.5l4 4"/></svg></button>'+
+    '<button class="tool" data-pen="marker" title="Маркер (2) · правая кнопка — настройки"><svg viewBox="0 0 24 24"><path d="M9 15l-3 3v2h4l3-3"/><path d="M12 17L7 12l8-8a2.8 2.8 0 0 1 4 4l-7 9z"/></svg></button>'+
+    '</div>';
+}
+/* Доп. инструменты по предмету — сейчас только физика, дальше можно дописать
+   другие предметы новыми ключами. Показывается всегда: доска пока не
+   привязывает список к своему предмету. Каждый пункт — это заранее
+   настроенный инструмент «линия» (S.pathKind + S.physicsPreset), готового
+   типа объекта на сервере под них заводить не пришлось: см. applyPhysicsLabel. */
+const EXTRA_TOOLS={
+  physics:{title:'Физика',tools:[
+    {id:'protractor',title:'Транспортир — угол между двумя отрезками',
+      icon:'<svg viewBox="0 0 24 24"><path d="M4 20L20 20"/><path d="M4 20L18 8"/><path d="M4 20L20 15"/></svg>'},
+    {id:'ruler',title:'Линейка — длина отрезка',
+      icon:'<svg viewBox="0 0 24 24"><rect x="3" y="9" width="18" height="6" rx="1"/><path d="M7 9v3M11 9v2M15 9v3"/></svg>'},
+    {id:'vector',title:'Вектор — стрелка с подписью величины',
+      icon:'<svg viewBox="0 0 24 24"><path d="M4 20L18 6"/><path d="M18 6l-5 1M18 6l-1 5"/></svg>'},
+  ]},
+};
+function findExtraTool(id){
+  for(const key in EXTRA_TOOLS)for(const t of EXTRA_TOOLS[key].tools)if(t.id===id)return t;
+  return null;
+}
+function buildMoreMenu(){
+  let html='';
+  for(const key in EXTRA_TOOLS){
+    const sec=EXTRA_TOOLS[key];
+    html+='<div class="head">'+sec.title+'</div><div class="grid" style="grid-template-columns:repeat(3,1fr)">';
+    for(const t of sec.tools)
+      html+='<button class="tool" data-extra="'+t.id+'" title="'+t.title+' · правая кнопка — закрепить на панели">'+t.icon+'</button>';
+    html+='</div>';
+  }
+  moreMenu.innerHTML=html;
+}
+function pinnedToolIds(){try{return JSON.parse(store.get('doska.pinnedTools')||'[]');}catch{return[];}}
+function syncMoreMenuPins(){
+  const list=pinnedToolIds();
+  moreMenu.querySelectorAll('[data-extra]').forEach(b=>b.classList.toggle('on',list.includes(b.dataset.extra)));
+}
+/** Закреплённые инструменты рисуются в основной панели теми же значками,
+    что и в доп.меню — общий каталог EXTRA_TOOLS не даёт им разъехаться. */
+function renderPinnedTools(){
+  const box=document.getElementById('pinnedTools');
+  box.innerHTML='';
+  for(const id of pinnedToolIds()){
+    const t=findExtraTool(id);if(!t)continue;
+    const b=document.createElement('button');
+    b.className='tool';b.title=t.title+' · правая кнопка — открепить';b.innerHTML=t.icon;
+    b.onclick=()=>applyExtraTool(id);
+    b.oncontextmenu=e=>{e.preventDefault();toggleExtraPin(id);};
+    box.appendChild(b);
+  }
+  syncMoreMenuPins();
+}
+function toggleExtraPin(id){
+  const list=pinnedToolIds();
+  const i=list.indexOf(id);
+  if(i>=0)list.splice(i,1);else list.push(id);
+  store.set('doska.pinnedTools',JSON.stringify(list));
+  renderPinnedTools();
+  hint(i>=0?'Инструмент откреплён от панели':'Инструмент закреплён на панели');
+}
+/** Пресеты физики — обычная «линия»/«ломаная», просто с готовой настройкой и
+    подписью-результатом после рисования (см. applyPhysicsLabel в commitPath):
+    новый тип объекта на сервере не заводим, линия и текст уже полностью
+    поддержаны (сохранение, отмена, синхронизация). */
+function applyExtraTool(id){
+  if(id==='protractor'){S.pathKind='polyline';S.physicsPreset='protractor';setTool('path');}
+  else if(id==='ruler'){S.pathKind='line';S.physicsPreset='ruler';setTool('path');}
+  else if(id==='vector'){S.pathKind='line';S.a2=2;S.physicsPreset='vector';setTool('path');}
+  moreOpen(false);
 }
 
-function shapesOpen(on){
-  shapesMenu.classList.toggle('hidden',!on);
-  shapesBtn.setAttribute('aria-expanded',on?'true':'false');
+/* Popover-и «Карандаш/Фигуры/Линии/Ещё» устроены одинаково: кнопка в доке
+   раскрывает список, иконка кнопки отражает последний выбор. */
+function popoverToggle(btn,menu){
+  return on=>{menu.classList.toggle('hidden',!on);btn.setAttribute('aria-expanded',on?'true':'false');};
 }
-function syncShapesIcon(){
-  const sel=S.tool==='path'?'[data-path="'+S.pathKind+'"]'
-           :S.tool==='shape'?'[data-shape="'+S.shapeKind+'"]':null;
-  const b=sel&&shapesMenu.querySelector(sel);
+const shapesOpen=popoverToggle(shapesBtn,shapesMenu);
+const pathOpen=popoverToggle(pathBtn,pathMenu);
+const penOpen=popoverToggle(penBtn,penKindMenu);
+const moreOpen=popoverToggle(moreBtn,moreMenu);
+function closeAllPopovers(){shapesOpen(false);pathOpen(false);penOpen(false);moreOpen(false);}
+function syncShapeIcon(){
+  const b=S.tool==='shape'&&shapesMenu.querySelector('[data-shape="'+S.shapeKind+'"]');
   if(b)shapesBtn.innerHTML=b.innerHTML;
 }
-/* Щелчок по значку открывает список фигур и сразу берёт квадрат: раньше он
-   только раскрывал список, и приходилось делать второй клик, чтобы начать
-   рисовать. Если фигура уже выбрана — оставляем её, менять инструмент под
-   рукой человека не годится. */
+function syncPathIcon(){
+  const b=S.tool==='path'&&pathMenu.querySelector('[data-path="'+S.pathKind+'"]');
+  if(b)pathBtn.innerHTML=b.innerHTML;
+}
+function syncPenIcon(){
+  const kind=S.tool==='marker'?'marker':'pen';
+  const b=penKindMenu.querySelector('[data-pen="'+kind+'"]');
+  if(b)penBtn.innerHTML=b.innerHTML;
+}
+/* Щелчок по значку открывает список и сразу берёт инструмент по умолчанию:
+   раньше он только раскрывал список, и приходилось делать второй клик, чтобы
+   начать рисовать. Если инструмент уже выбран — оставляем его, менять его
+   под рукой человека не годится. */
 shapesBtn.onclick=()=>{
   const opening=shapesMenu.classList.contains('hidden');
   shapesOpen(opening);
-  if(opening&&S.tool!=='shape'&&S.tool!=='path'){S.shapeKind='rect';setTool('shape');}
+  if(opening&&S.tool!=='shape'){S.shapeKind='rect';setTool('shape');}
 };
-// клик мимо закрывает список; capture — чтобы успеть до обработчиков холста
+pathBtn.onclick=()=>{
+  const opening=pathMenu.classList.contains('hidden');
+  pathOpen(opening);
+  if(opening&&S.tool!=='path'){S.physicsPreset=null;S.pathKind='line';setTool('path');}
+};
+penBtn.onclick=()=>{
+  const opening=penKindMenu.classList.contains('hidden');
+  penOpen(opening);
+  if(opening&&S.tool!=='pen'&&S.tool!=='marker')setTool('pen');
+};
+moreBtn.onclick=()=>moreOpen(moreMenu.classList.contains('hidden'));
+// клик мимо закрывает открытый список; capture — чтобы успеть до обработчиков холста
 document.addEventListener('pointerdown',e=>{
-  if(shapesMenu.classList.contains('hidden'))return;
-  if(shapesMenu.contains(e.target)||shapesBtn.contains(e.target))return;
-  shapesOpen(false);
+  for(const [btn,menu,close] of [[shapesBtn,shapesMenu,shapesOpen],[pathBtn,pathMenu,pathOpen],
+                                  [penBtn,penKindMenu,penOpen],[moreBtn,moreMenu,moreOpen]]){
+    if(menu.classList.contains('hidden'))continue;
+    if(menu.contains(e.target)||btn.contains(e.target))continue;
+    close(false);
+  }
 },true);
 
 /* ── панель настроек инструмента ───────────────────────────
@@ -2986,19 +3161,24 @@ document.getElementById('dock').addEventListener('contextmenu',e=>{
   if(b.dataset.tool)t=b.dataset.tool;
   else if(b.dataset.shape){S.shapeKind=b.dataset.shape;t='shape';}
   else if(b.dataset.path){S.pathKind=b.dataset.path;t='path';}
-  else if(b===shapesBtn)t=S.tool==='path'?'path':'shape';
+  else if(b===shapesBtn)t='shape';
+  else if(b===pathBtn)t='path';
+  else if(b===penBtn)t=S.tool==='marker'?'marker':'pen';
   if(!t||!STYLED.has(t))return;          // у ластика, руки и выделения настроек нет
   e.preventDefault();
   setTool(t);openPenPanel();
 });
 
 function setTool(t){
+  if(t!=='path')S.physicsPreset=null;
   S.tool=t;
   document.querySelectorAll('.tool[data-tool]').forEach(b=>b.classList.toggle('on',b.dataset.tool===t));
   document.querySelectorAll('.tool[data-shape]').forEach(b=>b.classList.toggle('on',t==='shape'&&b.dataset.shape===S.shapeKind));
   document.querySelectorAll('.tool[data-path]').forEach(b=>b.classList.toggle('on',t==='path'&&b.dataset.path===S.pathKind));
-  shapesBtn.classList.toggle('on',t==='shape'||t==='path');
-  syncShapesIcon();
+  shapesBtn.classList.toggle('on',t==='shape');
+  pathBtn.classList.toggle('on',t==='path');
+  penBtn.classList.toggle('on',t==='pen'||t==='marker');
+  syncShapeIcon();syncPathIcon();syncPenIcon();
   const styled=STYLED.has(t);
   const fillable=t==='shape'||t==='path';
   updatePenPanel();
@@ -3029,15 +3209,23 @@ document.querySelectorAll('.tool[data-tool]').forEach(b=>b.onclick=()=>{
   setTool(b.dataset.tool);
   if(same&&STYLED.has(b.dataset.tool)){S.panelOpen=!S.panelOpen;updatePenPanel();}
 });
-// Список фигур строится из каталога, поэтому кнопки надо создать до того, как
-// на них вешают обработчики.
-buildShapesMenu();
+// Списки фигур/линий/карандаша/доп.инструментов строятся из каталогов,
+// поэтому кнопки надо создать до того, как на них вешают обработчики.
+buildShapesMenu();buildPathMenu();buildPenMenu();buildMoreMenu();
 document.querySelectorAll('.tool[data-shape]').forEach(b=>b.onclick=()=>{
   S.shapeKind=b.dataset.shape;setTool('shape');shapesOpen(false);
 });
 document.querySelectorAll('.tool[data-path]').forEach(b=>b.onclick=()=>{
-  S.pathKind=b.dataset.path;setTool('path');shapesOpen(false);
+  S.physicsPreset=null;S.pathKind=b.dataset.path;setTool('path');pathOpen(false);
 });
+document.querySelectorAll('.tool[data-pen]').forEach(b=>b.onclick=()=>{
+  setTool(b.dataset.pen);penOpen(false);
+});
+document.querySelectorAll('#moreMenu [data-extra]').forEach(b=>{
+  b.onclick=()=>applyExtraTool(b.dataset.extra);
+  b.oncontextmenu=e=>{e.preventDefault();toggleExtraPin(b.dataset.extra);};
+});
+renderPinnedTools();
 document.getElementById('a1Sel').onchange=e=>{S.a1=+e.target.value;applyStyleToSelection('a1',S.a1);};
 document.getElementById('a2Sel').onchange=e=>{S.a2=+e.target.value;applyStyleToSelection('a2',S.a2);};
 sizeEl.oninput=()=>{S.size=+sizeEl.value;sizeVal.textContent=S.size;drawPreview();applyStyleToSelection('size',S.size);};
@@ -3170,9 +3358,12 @@ function applyRole(){
   document.getElementById('readonly').hidden=!ro;
   for(const b of document.querySelectorAll('.dock [data-tool]'))
     b.disabled=ro&&!['hand','select'].includes(b.dataset.tool);
-  // фигуры живут под своим значком — их надо гасить отдельно
-  for(const b of document.querySelectorAll('#shapesBtn,#shapesMenu .tool'))b.disabled=ro;
-  if(ro)shapesOpen(false);
+  // карандаш, фигуры, линии и доп.инструменты живут под своими значками вне
+  // общего [data-tool] — их надо гасить отдельно
+  for(const b of document.querySelectorAll(
+    '#penBtn,#penKindMenu .tool,#shapesBtn,#shapesMenu .tool,#pathBtn,#pathMenu .tool,#moreBtn,#moreMenu .tool,#pinnedTools .tool'
+  ))b.disabled=ro;
+  if(ro)closeAllPopovers();
   document.getElementById('undo').disabled=ro;
   document.getElementById('redo').disabled=ro;
   if(ro&&!['hand','select'].includes(S.tool))setTool('hand');
@@ -3192,12 +3383,18 @@ function setConn(s,msg){
   d.className='dot'+(s==='ok'?' ok':s==='off'?' off':'');
   d.title=msg;if(msg)hint(msg);
 }
+/* Строка снизу слева — не постоянная подсказка, а уведомление: показалась и
+   через несколько секунд сама скрылась (для подсказки по умолчанию — через
+   минуту, ей нужно время, чтобы её успели прочитать один раз при входе).
+   Раньше текст просто откатывался на HINT_DEFAULT и та висела бесконечно —
+   теперь строка исчезает совсем, а «потеряна связь»/«вошёл участник» и
+   прочее идут тем же путём, просто с более коротким таймером. */
 let hintTimer;const hintEl=document.getElementById('hint');
 const HINT_DEFAULT='колесо — масштаб · пробел — панорама · правая кнопка на инструменте — его настройки';
-function hint(t){
+function hint(t,ms){
   hintEl.classList.remove('hidden');
   hintEl.textContent=t;clearTimeout(hintTimer);
-  hintTimer=setTimeout(()=>hintEl.textContent=HINT_DEFAULT,3800);
+  hintTimer=setTimeout(()=>hintEl.classList.add('hidden'),ms||3800);
 }
 
 document.getElementById('undo').onclick=undo;
@@ -3267,7 +3464,8 @@ dockEdge.addEventListener('click',()=>{
 // выбрали инструмент — панель уходит обратно, чтобы не закрывать написанное
 dockEl.addEventListener('click',e=>{
   if(!touchOnly||S.dockPinned)return;
-  if(e.target.closest('#dockPin')||e.target.closest('#shapesBtn'))return;
+  if(e.target.closest('#shapesBtn')||e.target.closest('#pathBtn')||
+     e.target.closest('#penBtn')||e.target.closest('#moreBtn'))return;
   if(e.target.closest('.tool'))setTimeout(()=>dockEl.classList.remove('peek'),180);
 });
 // тронули холст — тоже убираем (и выехавший док, и открытую панель настроек
@@ -3733,18 +3931,18 @@ addEventListener('keydown',e=>{
   if(c==='Digit6')setTool('shape');
   if(c==='KeyR'){S.shapeKind='rect';setTool('shape');}
   if(c==='KeyO'){S.shapeKind='ellipse';setTool('shape');}
-  if(c==='KeyL'){S.pathKind='line';setTool('path');}
-  if(c==='KeyA'){S.pathKind='line';S.a2=2;setTool('path');}
-  if(c==='KeyN'){S.pathKind='polyline';setTool('path');}
-  if(c==='KeyC'){S.pathKind='curve';setTool('path');}
-  if(c==='KeyM'){S.pathKind='polygon';setTool('path');}
+  if(c==='KeyL'){S.physicsPreset=null;S.pathKind='line';setTool('path');}
+  if(c==='KeyA'){S.physicsPreset=null;S.pathKind='line';S.a2=2;setTool('path');}
+  if(c==='KeyN'){S.physicsPreset=null;S.pathKind='polyline';setTool('path');}
+  if(c==='KeyC'){S.physicsPreset=null;S.pathKind='curve';setTool('path');}
+  if(c==='KeyM'){S.physicsPreset=null;S.pathKind='polygon';setTool('path');}
   if(c==='Enter'&&pathDraft&&pathDraft.mode==='vertex'){e.preventDefault();commitPathDraft();}
   if(c==='KeyG')document.getElementById('gridBtn').click();
   if(c==='Digit0')document.getElementById('home').click();
   if(c==='Equal'){zoomAt(board.clientWidth/2,board.clientHeight/2,1.25);resyncPanning({x:board.clientWidth/2,y:board.clientHeight/2});}
   if(c==='Minus'){zoomAt(board.clientWidth/2,board.clientHeight/2,0.8);resyncPanning({x:board.clientWidth/2,y:board.clientHeight/2});}
   if((c==='Delete'||c==='Backspace')&&selection.length){e.preventDefault();document.getElementById('selDel').click();}
-  if(c==='Escape'){abortDraft();select(null);shapesOpen(false);S.panelOpen=false;updatePenPanel();}
+  if(c==='Escape'){abortDraft();select(null);closeAllPopovers();S.panelOpen=false;updatePenPanel();}
 });
 addEventListener('keyup',e=>{if(e.code==='Space'){spaceDown=false;applyCursor();}});
 addEventListener('resize',()=>{resize();refreshSelBar();});
@@ -4314,13 +4512,13 @@ function askName(){
   });
 }
 
-const boardUi=['dock','penPanel','topBar','zoombar','hint'];
+const boardUi=['dock','cornerTools','penPanel','topBar','zoombar','hint'];
 function showView(what){
   dash.classList.toggle('hidden',what!=='dash');
   loginEl.classList.toggle('hidden',what!=='login');
   stage.classList.toggle('hidden',what!=='board');
   for(const id of boardUi)document.getElementById(id).classList.toggle('hidden',what!=='board');
-  shapesOpen(false);
+  closeAllPopovers();
   updatePenPanel();                 // панель настроек открывается только вручную
 }
 const showBoard=on=>showView(on?'board':'dash');
@@ -4340,7 +4538,7 @@ async function openBoard(id){
   resize();
   S.cam={x:board.clientWidth/2,y:board.clientHeight/2,z:1};
   document.getElementById('zoom').textContent='100%';
-  hintEl.textContent=HINT_DEFAULT;
+  hint(HINT_DEFAULT,60000);           // подсказка по умолчанию — на минуту, дальше сама скроется
   setTool(S.tool==='select'?'pen':S.tool);
   renderInks();drawPreview();drawBoard();
   net.connect();
