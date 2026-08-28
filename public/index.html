@@ -2469,7 +2469,19 @@ function endPointer(e){
 stage.addEventListener('pointerup',endPointer);
 stage.addEventListener('pointercancel',endPointer);
 stage.addEventListener('pointerleave',()=>{hoverPt=null;drawLive();});
-stage.addEventListener('contextmenu',e=>e.preventDefault());
+/* Не на #stage: своё меню (openMenu) открывается в обработчике pointerup —
+   раньше, чем браузер решает, на каком элементе показать contextmenu. Меню
+   уже нарисовано и лежит поверх холста отдельным элементом, contextmenu
+   целится в него, а не в #stage, и точечный слушатель на холсте его не
+   ловит — родной меню Windows/Chrome вылезал поверх своего. На уровне
+   документа достаём событие независимо от того, куда оно на самом деле
+   попало; поля ввода (рабочая переименование и т.п.) не трогаем — там
+   родное меню (вставить и т.п.) нужно. */
+document.addEventListener('contextmenu',e=>{
+  if(!S.boardId)return;
+  if(/INPUT|TEXTAREA/.test((e.target||{}).tagName||''))return;
+  e.preventDefault();
+});
 stage.addEventListener('dblclick',e=>{
   if(pathDraft&&pathDraft.mode==='vertex'){e.preventDefault();commitPathDraft();}
   // двойной щелчок по надписи открывает её на правку — привычнее, чем
@@ -2651,16 +2663,28 @@ function commitErase(){
 }
 
 /* колесо: масштаб. Shift+колесо и пробел — панорама */
+// Панорамирование ЛКМ считает камеру абсолютно от точки старта жеста
+// (panning.cx/cy + сдвиг от panning.sx/sy) — если колесо/Shift-прокрутка
+// поменяет S.cam посреди этого жеста, а точку старта не обновить, то на
+// следующем pointermove панорама перепишет камеру по старой опорной точке
+// и всё, что сделал зум, схлопнется одним резким скачком. Пересинхронизируем
+// опору на текущее положение сразу после любого стороннего сдвига камеры.
+const resyncPanning=p=>{
+  if(!panning)return;
+  panning.cx=S.cam.x;panning.cy=S.cam.y;panning.sx=p.x;panning.sy=p.y;
+};
 stage.addEventListener('wheel',e=>{
   e.preventDefault();
   const p=localXY(e);
   if(e.shiftKey&&!e.ctrlKey){
     S.cam.y-=e.deltaY*(e.deltaMode===1?18:1);
     S.cam.x-=e.deltaX*(e.deltaMode===1?18:1);
+    resyncPanning(p);
     camChanged();refreshSelBar();return;
   }
   const raw=Math.exp(-e.deltaY*(e.deltaMode===1?0.03:0.0022));
   zoomAt(p.x,p.y,Math.min(1.22,Math.max(0.82,raw)));
+  resyncPanning(p);
   refreshSelBar();
 },{passive:false});
 
@@ -3717,8 +3741,8 @@ addEventListener('keydown',e=>{
   if(c==='Enter'&&pathDraft&&pathDraft.mode==='vertex'){e.preventDefault();commitPathDraft();}
   if(c==='KeyG')document.getElementById('gridBtn').click();
   if(c==='Digit0')document.getElementById('home').click();
-  if(c==='Equal')zoomAt(board.clientWidth/2,board.clientHeight/2,1.25);
-  if(c==='Minus')zoomAt(board.clientWidth/2,board.clientHeight/2,0.8);
+  if(c==='Equal'){zoomAt(board.clientWidth/2,board.clientHeight/2,1.25);resyncPanning({x:board.clientWidth/2,y:board.clientHeight/2});}
+  if(c==='Minus'){zoomAt(board.clientWidth/2,board.clientHeight/2,0.8);resyncPanning({x:board.clientWidth/2,y:board.clientHeight/2});}
   if((c==='Delete'||c==='Backspace')&&selection.length){e.preventDefault();document.getElementById('selDel').click();}
   if(c==='Escape'){abortDraft();select(null);shapesOpen(false);S.panelOpen=false;updatePenPanel();}
 });
