@@ -1844,28 +1844,117 @@ function zoomGraphAt(it,worldPt,factor){
   view.scale=newScale;
   it.bbox=null;
 }
+/* props кладётся в net.send/pushUndo как есть, а points/expressions —
+   вложенные массивы: обычный {...it.props} их не копирует, только делит
+   ссылку. Для undo это опасно — "снимок до" незаметно менялся бы вместе с
+   "после". props насквозь JSON-совместим (это его смысл — едет по сети),
+   поэтому клонировать проще всего через JSON. */
+const cloneProps=p=>JSON.parse(JSON.stringify(p));
+/** Экранные (в мировых координатах) места подписей осей X/Y — общая
+    формула для отрисовки и для клика по ним (переименование). Если сама
+    ось сейчас за пределами вида (график далеко панорамирован), подпись не
+    убегает вникуда, а держится у ближайшего края рамки. */
+function graphAxisLabelPos(it){
+  const view=it.props.view||{cx:0,cy:0,scale:40};
+  const ccx=it.x+it.w/2,ccy=it.y+it.h/2;
+  const ax=ccx+(0-view.cx)*view.scale, ay=ccy-(0-view.cy)*view.scale;
+  const top=it.y+GRAPH_HEADER_H+12,bottom=it.y+it.h-8,left=it.x+8,right=it.x+it.w-14;
+  const xAxisY=Math.min(Math.max(ay,top),bottom);
+  const yAxisX=Math.min(Math.max(ax,left),right);
+  return {
+    x:{wx:right,wy:xAxisY-10},
+    y:{wx:yAxisX+10,wy:top-4},
+  };
+}
+/** Число для подписи деления — обычный toFixed съедает память лишними
+    нулями (1.00 вместо 1), а обрезка вручную не путается с 1e-9 от
+    накопленной погрешности плавающей точки. */
+function graphFmtNum(v){
+  const r=Math.round(v*100)/100;
+  if(Number.isInteger(r))return String(r);
+  return String(r.toFixed(2)).replace(/0+$/,'').replace(/\.$/,'');
+}
+/** Координаты под курсором внутри графика — при наведении, либо пока
+    тащат точку (тогда — её точное положение, а не позиция курсора: хват
+    не всегда впритык). Рисуется на «живом» слое (см. flushLive) заново
+    каждый кадр — не хранится нигде, не мешает основному рендеру графика
+    на статичном. Вызывается уже из экранно-пиксельного контекста (после
+    setTransform(dpr,...) в flushLive), поэтому мировые координаты сюда
+    переводятся вручную через toScreen(). */
+function paintGraphCoordHint(ctx){
+  let it,mx,my,highlight=false;
+  if(dragging&&dragging.mode==='graphPointDrag'){
+    it=dragging.it;
+    const p=it.props.points&&it.props.points[dragging.index];
+    if(!p)return;
+    mx=p.x;my=p.y;highlight=true;
+  }else if(!dragging&&hoverPt&&S.tool==='select'){
+    const w=toWorld(hoverPt.x,hoverPt.y);
+    const g=itemAt(w);
+    if(!g||g.type!=='physics'||g.kind!=='graph')return;
+    if(w.y-g.y<=GRAPH_HEADER_H)return;
+    it=g;
+    const view=g.props.view,gcx=g.x+g.w/2,gcy=g.y+g.h/2;
+    mx=view.cx+(w.x-gcx)/view.scale;my=view.cy-(w.y-gcy)/view.scale;
+    // приклеиваемся к близкой точке — удобнее целиться числом, чем на глаз
+    for(const p of (g.props.points||[])){
+      const sx=gcx+(p.x-view.cx)*view.scale,sy=gcy-(p.y-view.cy)*view.scale;
+      if(Math.hypot(w.x-sx,w.y-sy)*S.cam.z<9){mx=p.x;my=p.y;highlight=true;break;}
+    }
+  }else return;
+  const view=it.props.view,gcx=it.x+it.w/2,gcy=it.y+it.h/2;
+  const wx=gcx+(mx-view.cx)*view.scale,wy=gcy-(my-view.cy)*view.scale;
+  const sp=toScreen(wx,wy);
+  ctx.fillStyle=highlight?'#2F6FE0':'#1A1C20';
+  ctx.beginPath();ctx.arc(sp.x,sp.y,highlight?5:3,0,6.2832);ctx.fill();
+  const txt='('+graphFmtNum(mx)+', '+graphFmtNum(my)+')';
+  ctx.font='11px ui-monospace,SFMono-Regular,Menlo,monospace';
+  const tw=ctx.measureText(txt).width+10;
+  const bx=Math.min(sp.x+10,innerWidth-tw-8),by=Math.max(8,sp.y-26);
+  ctx.fillStyle='rgba(26,28,32,.92)';
+  ctx.beginPath();ctx.roundRect(bx,by,tw,18,5);ctx.fill();
+  ctx.fillStyle='#fff';ctx.textAlign='left';ctx.textBaseline='middle';
+  ctx.fillText(txt,bx+5,by+9);
+  ctx.textAlign='start';ctx.textBaseline='alphabetic';
+}
 function paintGraph(ctx,it){
   const view=it.props.view||{cx:0,cy:0,scale:40};
   const bx=it.x,by=it.y,bw=it.w,bh=it.h;
   const ccx=bx+bw/2,ccy=by+bh/2;
   const toSx=mx=>ccx+(mx-view.cx)*view.scale, toSy=my=>ccy-(my-view.cy)*view.scale;
   const toMx=sx=>view.cx+(sx-ccx)/view.scale, toMy=sy=>view.cy-(sy-ccy)/view.scale;
+  const ax=toSx(0), ay=toSy(0);
+  // где рисовать подписи делений — на самой оси, если она видна, иначе
+  // прижимаем к краю рамки (график далеко панорамирован, ось за кадром)
+  const xAxisY=Math.min(Math.max(ay,by+GRAPH_HEADER_H+12),by+bh-8);
+  const yAxisX=Math.min(Math.max(ax,bx+8),bx+bw-14);
   ctx.save();
   ctx.beginPath();ctx.rect(bx,by,bw,bh);ctx.clip();
   ctx.fillStyle='#FCFBF8';ctx.fillRect(bx,by,bw,bh);
   const stepX=graphNiceStep(80/view.scale), stepY=graphNiceStep(80/view.scale);
   ctx.strokeStyle='rgba(0,0,0,.08)';ctx.lineWidth=1;
+  ctx.font='10px ui-sans-serif,system-ui,sans-serif';ctx.fillStyle='rgba(0,0,0,.45)';
+  ctx.textAlign='center';ctx.textBaseline='top';
   for(let mx=Math.ceil(toMx(bx)/stepX)*stepX;mx<=toMx(bx+bw);mx+=stepX){
     const sx=toSx(mx);ctx.beginPath();ctx.moveTo(sx,by);ctx.lineTo(sx,by+bh);ctx.stroke();
+    if(Math.abs(mx)>stepX*0.01)ctx.fillText(graphFmtNum(mx),sx,xAxisY+3);   // «0» подписывает вертикальная сетка
   }
+  ctx.textAlign='right';ctx.textBaseline='middle';
   for(let my=Math.ceil(toMy(by+bh)/stepY)*stepY;my<=toMy(by);my+=stepY){
     const sy=toSy(my);ctx.beginPath();ctx.moveTo(bx,sy);ctx.lineTo(bx+bw,sy);ctx.stroke();
+    if(Math.abs(my)>stepY*0.01)ctx.fillText(graphFmtNum(my),yAxisX-4,sy);
   }
-  ctx.strokeStyle='rgba(0,0,0,.35)';ctx.lineWidth=1.4;
-  const ax=toSx(0);
-  if(ax>=bx&&ax<=bx+bw){ctx.beginPath();ctx.moveTo(ax,by);ctx.lineTo(ax,by+bh);ctx.stroke();}
-  const ay=toSy(0);
-  if(ay>=by&&ay<=by+bh){ctx.beginPath();ctx.moveTo(bx,ay);ctx.lineTo(bx+bw,ay);ctx.stroke();}
+  // оси со стрелками — «единичный отрезок» виден по подписанным делениям выше
+  ctx.strokeStyle='rgba(0,0,0,.4)';ctx.fillStyle='rgba(0,0,0,.4)';ctx.lineWidth=1.4;
+  if(ax>=bx&&ax<=bx+bw){
+    ctx.beginPath();ctx.moveTo(ax,by);ctx.lineTo(ax,by+bh);ctx.stroke();
+    drawArrowhead(ctx,{x:ax,y:by+GRAPH_HEADER_H+16},{x:ax,y:by+GRAPH_HEADER_H+2},1,5,'rgba(0,0,0,.4)');
+  }
+  if(ay>=by&&ay<=by+bh){
+    ctx.beginPath();ctx.moveTo(bx,ay);ctx.lineTo(bx+bw,ay);ctx.stroke();
+    drawArrowhead(ctx,{x:bx+bw-16,y:ay},{x:bx+bw-2,y:ay},1,5,'rgba(0,0,0,.4)');
+  }
+  ctx.fillText('0',yAxisX-4,xAxisY+3);   // подпись начала координат — единственная общая для обеих осей
   for(const ex of (it.props.expressions||[])){
     if(ex.visible===false||!ex.text||!ex.text.trim())continue;
     const {ast}=graphCompile(ex.text);
@@ -1884,7 +1973,21 @@ function paintGraph(ctx,it){
     }
     ctx.stroke();
   }
+  // точки, поставленные вручную — координаты хранятся в математическом
+  // пространстве графика, поэтому сами едут вместе с видом при панораме/зуме
+  for(const p of (it.props.points||[])){
+    const sx=toSx(p.x),sy=toSy(p.y);
+    ctx.fillStyle='#1A1C20';ctx.strokeStyle='#fff';ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.arc(sx,sy,4,0,6.2832);ctx.fill();ctx.stroke();
+  }
   ctx.restore();
+  // подписи осей — снаружи клипа не нужны (они внутри рамки), но рисуем уже
+  // после кривых, чтобы не потерялись под линией графика
+  const lbl=graphAxisLabelPos(it);
+  ctx.font='600 12px ui-sans-serif,system-ui,sans-serif';ctx.fillStyle='#4A4E55';
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText(it.props.xLabel||'x',lbl.x.wx,lbl.x.wy);
+  ctx.fillText(it.props.yLabel||'y',lbl.y.wx,lbl.y.wy);
   ctx.strokeStyle='rgba(0,0,0,.25)';ctx.lineWidth=1.5;ctx.strokeRect(bx,by,bw,bh);
   ctx.fillStyle='rgba(0,0,0,.05)';ctx.fillRect(bx,by,bw,GRAPH_HEADER_H);
   ctx.strokeStyle='rgba(0,0,0,.12)';ctx.lineWidth=1;
@@ -2396,6 +2499,7 @@ function flushLive(){
     lctx.strokeStyle='rgba(30,32,36,.55)';lctx.lineWidth=1.2;lctx.stroke();
     lctx.fillStyle='rgba(255,255,255,.35)';lctx.fill();
   }
+  paintGraphCoordHint(lctx);
   // курсоры участников
   const now=performance.now();
   for(const [id,c] of cursors){
@@ -2915,6 +3019,22 @@ function handlesFor(it){
       handles.push({name:'v'+i,kind:'vertex',index:i,sx:s.x,sy:s.y});
     });
   }
+  // у графика — свои ручки поверх обычных (ресайз/перенос за шапку не
+  // трогаем): точки, которые можно перетаскивать, и подписи осей, по
+  // которым можно кликнуть, чтобы переименовать
+  if(it.type==='physics'&&it.kind==='graph'){
+    const view=it.props.view||{cx:0,cy:0,scale:40};
+    const gcx=it.x+it.w/2,gcy=it.y+it.h/2;
+    (it.props.points||[]).forEach((p,i)=>{
+      const wx=gcx+(p.x-view.cx)*view.scale, wy=gcy-(p.y-view.cy)*view.scale;
+      const s=toScreen(wx,wy);
+      handles.push({name:'gp'+i,kind:'graphPoint',index:i,sx:s.x,sy:s.y});
+    });
+    const lbl=graphAxisLabelPos(it);
+    const sxl=toScreen(lbl.x.wx,lbl.x.wy), syl=toScreen(lbl.y.wx,lbl.y.wy);
+    handles.push({name:'xLabel',kind:'axisLabel',axis:'x',sx:sxl.x,sy:sxl.y});
+    handles.push({name:'yLabel',kind:'axisLabel',axis:'y',sx:syl.x,sy:syl.y});
+  }
   return handles;
 }
 function handleAt(sp){
@@ -3009,6 +3129,20 @@ stage.addEventListener('pointerdown',e=>{
         dragging={mode:'angle',it:selected,end:h.end,start:snapshotItem(selected)};
       }else if(h.kind==='vertex'){
         dragging={mode:'vertex',it:selected,index:h.index,start:snapshotItem(selected)};
+      }else if(h.kind==='graphPoint'){
+        dragging={mode:'graphPointDrag',it:selected,index:h.index,before:cloneProps(selected.props)};
+      }else if(h.kind==='axisLabel'){
+        const cur=h.axis==='x'?(selected.props.xLabel||'x'):(selected.props.yLabel||'y');
+        const name=prompt('Название оси:',cur);
+        if(name&&name.trim()){
+          const before=cloneProps(selected.props);
+          if(h.axis==='x')selected.props.xLabel=name.trim().slice(0,12);
+          else selected.props.yLabel=name.trim().slice(0,12);
+          selected.bbox=null;
+          pushUndo([{type:'move',id:selected.id,before:{props:before},after:{props:cloneProps(selected.props)}}]);
+          net.send({t:'move',id:selected.id,props:{...selected.props}});
+          drawBoard();
+        }
       }else{
         const anchor=OPPOSITE_CORNER[h.name];
         const geom=snapshotItem(selected);
@@ -3123,6 +3257,12 @@ stage.addEventListener('pointermove',e=>{
   if(pointers.has(e.pointerId))pointers.set(e.pointerId,{...pt,t:performance.now()});
   hoverPt=pt;                                  // нужна и ластику, и вставке скрина
   if(S.tool==='eraser')drawLive();
+  // наведение на график — координаты под курсором должны обновляться на
+  // каждое движение мыши, а не только пока что-то тащат
+  if(S.tool==='select'&&!dragging){
+    const g=itemAt(toWorld(pt.x,pt.y));
+    if(g&&g.type==='physics'&&g.kind==='graph')drawLive();
+  }
   // резиновая линия к курсору в режиме расстановки вершин — работает и без
   // нажатой кнопки (обычное наведение), поэтому проверяется независимо от
   // pinch/panning/dragging ниже
@@ -3167,6 +3307,17 @@ stage.addEventListener('pointermove',e=>{
       view.cx=dragging.start.cx-dx/scale;
       view.cy=dragging.start.cy+dy/scale;
       dragging.it.bbox=null;
+      drawBoard();refreshSelBar();drawLive();return;
+    }
+    if(dragging.mode==='graphPointDrag'){
+      // абсолютная привязка к курсору, а не смещение от старта — как и у
+      // обычных ручек ресайза: маленькую точку хватают не всегда впритык,
+      // а с 9-пиксельным допуском, и тянуть её «от места хвата» смотрелось
+      // бы неточно на таком масштабе
+      const g=dragging.it, view=g.props.view, gcx=g.x+g.w/2, gcy=g.y+g.h/2;
+      const p=g.props.points&&g.props.points[dragging.index];
+      if(p){p.x=view.cx+(w.x-gcx)/view.scale; p.y=view.cy-(w.y-gcy)/view.scale;}
+      g.bbox=null;
       drawBoard();refreshSelBar();drawLive();return;
     }
     const it=dragging.it,st=dragging.start;
@@ -3375,6 +3526,21 @@ function endPointer(e){
     net.send({t:'move',id:dragging.it.id,props:{...dragging.it.props}});
     dragging=null;
     refreshSelBar();
+  }else if(dragging&&dragging.mode==='graphPointDrag'){
+    // точку, вынесенную за пределы графика, не оставляем висеть снаружи —
+    // это и есть способ её удалить, без отдельной кнопки/меню под неё
+    const g=dragging.it, wEnd=toWorld(localXY(e).x,localXY(e).y);
+    const outside=wEnd.x<g.x||wEnd.x>g.x+g.w||wEnd.y<g.y+GRAPH_HEADER_H||wEnd.y>g.y+g.h;
+    if(outside&&g.props.points)g.props.points.splice(dragging.index,1);
+    g.bbox=null;
+    const after=cloneProps(g.props);
+    if(JSON.stringify(dragging.before)!==JSON.stringify(after)){
+      pushUndo([{type:'move',id:g.id,before:{props:dragging.before},after:{props:after}}]);
+      net.send({t:'move',id:g.id,props:after});
+    }
+    if(outside)hint('Точка удалена');
+    dragging=null;
+    refreshSelBar();drawBoard();
   }else if(dragging){
     // перенос группы — одна запись в истории на весь жест, иначе Ctrl+Z
     // возвращал бы объекты по одному
@@ -3462,8 +3628,22 @@ stage.addEventListener('dblclick',e=>{
   // двойной щелчок по надписи открывает её на правку — привычнее, чем
   // возвращаться к инструменту «надпись»
   if(S.tool==='select'){
-    const p=localXY(e), it=itemAt(toWorld(p.x,p.y));
+    const p=localXY(e), w=toWorld(p.x,p.y), it=itemAt(w);
     if(it&&it.type==='text'&&mineOnly(it)&&!it.locked){e.preventDefault();openTextEditor(null,it);}
+    // двойной щелчок по телу графика (не по уже стоящей там точке/ручке) —
+    // ставит новую точку прямо в это математическое место
+    else if(it&&it.type==='physics'&&it.kind==='graph'&&mineOnly(it)&&!it.locked&&
+            canEdit()&&(w.y-it.y)>GRAPH_HEADER_H&&!(selected===it&&handleAt(p))){
+      const view=it.props.view, gcx=it.x+it.w/2, gcy=it.y+it.h/2;
+      const mx=view.cx+(w.x-gcx)/view.scale, my=view.cy-(w.y-gcy)/view.scale;
+      const before=cloneProps(it.props);
+      (it.props.points=it.props.points||[]).push({id:newId(),x:mx,y:my});
+      it.bbox=null;
+      pushUndo([{type:'move',id:it.id,before:{props:before},after:{props:cloneProps(it.props)}}]);
+      net.send({t:'move',id:it.id,props:{...it.props}});
+      if(!inSelection(it))selectMany(withGroup([it]));
+      drawBoard();
+    }
   }
 });
 
@@ -3802,7 +3982,8 @@ function placePhysics(kind,w){
     :kind==='body'?{material:S.physicsProps.body.material,mass:S.physicsProps.body.mass,
                     energyJoules:0,elapsedSeconds:0,started:false}
     :kind==='graph'?{view:{cx:0,cy:0,scale:40},
-                      expressions:[{id:newId(),text:'',color:GRAPH_COLORS[0],visible:true}]}
+                      expressions:[{id:newId(),text:'',color:GRAPH_COLORS[0],visible:true}],
+                      points:[],xLabel:'x',yLabel:'y'}
     :{};
   const it={id:newId(),by:S.me&&S.me.uid,type:'physics',kind,
             x:w.x-size.w/2,y:w.y-size.h/2,w:size.w,h:size.h,rot:0,locked:false,props};

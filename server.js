@@ -1032,7 +1032,16 @@ function cleanPhysicsProps(kind, props) {
       color: (e && typeof e.color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(e.color)) ? e.color : '#2F6FE0',
       visible: !(e && e.visible === false),
     }));
-    return { view, expressions };
+    // точки, поставленные вручную (см. "добавить точку" в index.html) — только
+    // координаты, никакой формулы, поэтому валидировать нечего, кроме чисел
+    const pts = Array.isArray(p.points) ? p.points.slice(0, 30) : [];
+    const points = pts.map(pt => ({
+      id: (pt && typeof pt.id === 'string' && pt.id) ? pt.id.slice(0, 32) : rnd(8),
+      x: Number.isFinite(+(pt && pt.x)) ? +pt.x : 0,
+      y: Number.isFinite(+(pt && pt.y)) ? +pt.y : 0,
+    }));
+    const label = (v, d) => (typeof v === 'string' && v.trim()) ? v.trim().slice(0, 12) : d;
+    return { view, expressions, points, xLabel: label(p.xLabel, 'x'), yLabel: label(p.yLabel, 'y') };
   }
   return {};
 }
