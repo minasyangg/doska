@@ -972,13 +972,26 @@ function cleanPath(p, by) {
    поля белого списка не пропускаем дальше — вся содержательная физика
    (поле магнита, стрелка компаса) всё равно считается на клиенте по одним
    этим координатам, серверу знать её не нужно. */
-const PHYSICS_KINDS = new Set(['magnet', 'compass']);
+// оптика (источник/линза/зеркало) — та же геометрия x,y,w,h,rot, что и у
+// магнита/компаса, лучи и преломление считает клиент по этим координатам
+const PHYSICS_KINDS = new Set(['magnet', 'compass', 'light-source', 'lens', 'mirror']);
 function cleanPhysicsProps(kind, props) {
   const p = props && typeof props === 'object' ? props : {};
   if (kind === 'magnet') {
     const s = Number.isFinite(+p.strength) ? +p.strength : 1;
     // строгих Тесла тут нет — школьная модель условна, но подписана в Тл на панели
     return { strength: Math.max(0.2, Math.min(3, s)), showField: p.showField !== false };
+  }
+  if (kind === 'light-source') {
+    const rc = Number.isFinite(+p.rayCount) ? Math.round(+p.rayCount) : 5;
+    const sp = Number.isFinite(+p.spreadDeg) ? +p.spreadDeg : 16;
+    return { rayCount: Math.max(1, Math.min(41, rc)), spreadDeg: Math.max(0, Math.min(90, sp)) };
+  }
+  if (kind === 'lens') {
+    const f = Number.isFinite(+p.focal) ? +p.focal : 140;
+    // знак — собирающая/рассеивающая, зажимаем модуль, знак не трогаем
+    const sign = f < 0 ? -1 : 1;
+    return { focal: sign * Math.max(60, Math.min(400, Math.abs(f))) };
   }
   return {};
 }
@@ -987,8 +1000,8 @@ function cleanPhysics(o, by) {
   const num = (v, d) => Number.isFinite(+v) ? +v : d;
   return { id: String(o.id).slice(0, 48), by, type: 'physics', kind: o.kind,
            x: num(o.x, 0), y: num(o.y, 0),
-           w: Math.max(16, Math.min(400, num(o.w, 60))),
-           h: Math.max(16, Math.min(400, num(o.h, 60))),
+           w: Math.max(8, Math.min(400, num(o.w, 60))),
+           h: Math.max(8, Math.min(400, num(o.h, 60))),
            rot: num(o.rot, 0),
            props: cleanPhysicsProps(o.kind, o.props),
            g: clampGroup(o.g),
@@ -1051,8 +1064,8 @@ const PATCH_CLAMP = {
     g: clampG,
     x: (v, it) => Number.isFinite(+v) ? +v : it.x,
     y: (v, it) => Number.isFinite(+v) ? +v : it.y,
-    w: (v, it) => Math.max(16, Math.min(400, Number.isFinite(+v) ? +v : it.w)),
-    h: (v, it) => Math.max(16, Math.min(400, Number.isFinite(+v) ? +v : it.h)),
+    w: (v, it) => Math.max(8, Math.min(400, Number.isFinite(+v) ? +v : it.w)),
+    h: (v, it) => Math.max(8, Math.min(400, Number.isFinite(+v) ? +v : it.h)),
     rot: (v, it) => Number.isFinite(+v) ? +v : it.rot,
     locked: (v) => !!v
   },
