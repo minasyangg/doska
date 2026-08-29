@@ -974,7 +974,11 @@ function cleanPath(p, by) {
    этим координатам, серверу знать её не нужно. */
 // оптика (источник/линза/зеркало) — та же геометрия x,y,w,h,rot, что и у
 // магнита/компаса, лучи и преломление считает клиент по этим координатам
-const PHYSICS_KINDS = new Set(['magnet', 'compass', 'light-source', 'lens', 'mirror']);
+// тепловые (нагреватель/тело/калориметр) — единственные, у кого props
+// меняются уже после постановки (energyJoules у тела растёт, пока рядом
+// греет нагреватель), см. PATCH_CLAMP.physics.props ниже
+const PHYSICS_KINDS = new Set(['magnet', 'compass', 'light-source', 'lens', 'mirror', 'heater', 'body', 'calorimeter']);
+const BODY_MATERIALS = new Set(['water', 'copper', 'aluminum', 'lead', 'steel']);
 function cleanPhysicsProps(kind, props) {
   const p = props && typeof props === 'object' ? props : {};
   if (kind === 'magnet') {
@@ -992,6 +996,23 @@ function cleanPhysicsProps(kind, props) {
     // знак — собирающая/рассеивающая, зажимаем модуль, знак не трогаем
     const sign = f < 0 ? -1 : 1;
     return { focal: sign * Math.max(60, Math.min(400, Math.abs(f))) };
+  }
+  if (kind === 'heater') {
+    const pw = Number.isFinite(+p.power) ? +p.power : 500;
+    return { power: Math.max(10, Math.min(5000, pw)) };
+  }
+  if (kind === 'body') {
+    const mat = BODY_MATERIALS.has(p.material) ? p.material : 'water';
+    const mass = Number.isFinite(+p.mass) ? +p.mass : 0.1;
+    const energy = Number.isFinite(+p.energyJoules) ? +p.energyJoules : 0;
+    const elapsed = Number.isFinite(+p.elapsedSeconds) ? +p.elapsedSeconds : 0;
+    return {
+      material: mat,
+      mass: Math.max(0.001, Math.min(50, mass)),
+      energyJoules: Math.max(0, Math.min(1e9, energy)),
+      elapsedSeconds: Math.max(0, Math.min(1e7, elapsed)),
+      started: !!p.started,
+    };
   }
   return {};
 }
@@ -1057,9 +1078,11 @@ const PATCH_CLAMP = {
     rot: (v, it) => Number.isFinite(+v) ? +v : it.rot,
     locked: (v) => !!v
   },
-  // kind и props не патчатся: вид объекта и его физические параметры (сила
-  // магнита) задаются один раз при постановке — редактор свойств сделаем
-  // отдельным шагом, когда он понадобится
+  // kind не патчится — вид объекта задаётся один раз при постановке. props
+  // патчится (через тот же cleanPhysicsProps, что и при 'add') — нужно телу:
+  // energyJoules/elapsedSeconds растут, пока рядом греет нагреватель, и это
+  // единственный физический объект, чьи параметры вообще меняются во
+  // времени, а не только руками через панель при постановке.
   physics: {
     g: clampG,
     x: (v, it) => Number.isFinite(+v) ? +v : it.x,
@@ -1067,6 +1090,7 @@ const PATCH_CLAMP = {
     w: (v, it) => Math.max(8, Math.min(400, Number.isFinite(+v) ? +v : it.w)),
     h: (v, it) => Math.max(8, Math.min(400, Number.isFinite(+v) ? +v : it.h)),
     rot: (v, it) => Number.isFinite(+v) ? +v : it.rot,
+    props: (v, it) => cleanPhysicsProps(it.kind, v),
     locked: (v) => !!v
   },
   pen: {

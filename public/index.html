@@ -519,6 +519,22 @@
     <div class="label" style="margin-bottom:5px">Фокусное расстояние <span id="physFocalVal" style="color:var(--text)">140</span></div>
     <input type="range" id="physFocal" min="60" max="400" step="10" value="140">
   </div>
+  <div id="physicsHeaterRow" class="hidden">
+    <div class="label" style="margin-bottom:5px">Мощность <span id="physPowerVal" style="color:var(--text)">500</span> Вт</div>
+    <input type="range" id="physPower" min="50" max="3000" step="50" value="500">
+  </div>
+  <div id="physicsBodyRow" class="hidden">
+    <div class="label" style="margin-bottom:5px">Вещество</div>
+    <select id="physMaterial" style="width:100%;background:var(--panel-2);color:var(--text);border:1px solid var(--edge);border-radius:6px;padding:6px;margin-bottom:9px">
+      <option value="water">Вода / лёд</option>
+      <option value="copper">Медь</option>
+      <option value="aluminum">Алюминий</option>
+      <option value="lead">Свинец</option>
+      <option value="steel">Сталь</option>
+    </select>
+    <div class="label" style="margin-bottom:5px">Масса <span id="physMassVal" style="color:var(--text)">100</span> г</div>
+    <input type="range" id="physMass" min="10" max="1000" step="10" value="100">
+  </div>
   <div class="label" style="margin-top:9px;font-size:11.5px">Кликните по доске, чтобы поставить.</div>
 </div>
 
@@ -696,6 +712,8 @@ const S={tool:'pen',size:4,color:PENS[0],penColor:PENS[0],markerColor:MARKERS[0]
     magnet:{strength:1,showField:true},
     'light-source':{rayCount:5,spreadDeg:16},
     lens:{focal:140},
+    heater:{power:500},
+    body:{material:'water',mass:0.1},
   },
   // знак фокусного расстояния линзы — задаётся выбором инструмента
   // (Собирающая/Рассеивающая), а не самой панелью: там правится только
@@ -1459,11 +1477,220 @@ function paintSource(ctx,it){
   ctx.restore();
 }
 
+/* ── тепловые явления: нагреватель, тело, калориметр ─────────────
+   Тот же принцип, что у остальной физики: объекты — данные, поведение
+   считает общий код. Разница только в одном — здесь впервые появляется
+   настоящее время: температура тела растёт, пока рядом греет нагреватель,
+   даже если никто на доске ничего не трогает. Хранить саму температуру
+   как отдельное синхронизируемое поле не стали — она всегда пересчитана
+   из energyJoules (Дж, суммарно переданное количество теплоты) по
+   формулам количества теплоты; это единственное число, которое реально
+   меняется во времени и периодически уходит по сети остальным
+   участникам (см. thermalTick ниже), а не сама температура — так суммарно
+   переданная теплота остаётся верной, даже если мощность нагревателя
+   меняли посреди нагрева. */
+const MATERIALS={
+  water:{title:'Вода / лёд',cSolid:2100,cLiquid:4200,cGas:2000,
+    melt:0,boil:100,fusion:330000,vapor:2260000,t0:-10},
+  copper:{title:'Медь',cSolid:380,melt:1085,fusion:205000,t0:20},
+  aluminum:{title:'Алюминий',cSolid:920,melt:660,fusion:390000,t0:20},
+  lead:{title:'Свинец',cSolid:140,melt:327,fusion:25000,t0:20},
+  steel:{title:'Сталь',cSolid:460,melt:1450,fusion:270000,t0:20},
+};
+/** Температура и фаза тела по суммарно переданному количеству теплоты —
+    ровно та стадийная модель, по которой в учебнике строят график
+    нагревания: греем твёрдое до t плавления, тратим теплоту плавления
+    (температура стоит на месте — «плато»), греем жидкость до кипения,
+    тратим теплоту парообразования (снова плато), греем пар. У металлов
+    (нет boil/vapor/cLiquid в таблице) кипение не моделируем — после
+    плавления жидкость греется дальше без потолка, приближённо тем же c,
+    что и твёрдое тело: раздельных данных по жидкой фазе металлов в
+    школьном курсе обычно и не дают. */
+function tempFromEnergy(mat,mass,Q){
+  const cS=mat.cSolid,cL=mat.cLiquid||mat.cSolid,cG=mat.cGas||cL;
+  let q=Math.max(0,Q);
+  const q1=cS*mass*(mat.melt-mat.t0);
+  if(q<q1)return {temp:mat.t0+q/(cS*mass),phase:'solid'};
+  q-=q1;
+  const qFusion=(mat.fusion||0)*mass;
+  if(q<qFusion)return {temp:mat.melt,phase:'melting'};
+  q-=qFusion;
+  if(mat.boil==null)return {temp:mat.melt+q/(cL*mass),phase:'liquid'};
+  const q3=cL*mass*(mat.boil-mat.melt);
+  if(q<q3)return {temp:mat.melt+q/(cL*mass),phase:'liquid'};
+  q-=q3;
+  const qVapor=(mat.vapor||0)*mass;
+  if(q<qVapor)return {temp:mat.boil,phase:'boiling'};
+  q-=qVapor;
+  return {temp:mat.boil+q/(cG*mass),phase:'gas'};
+}
+const PHASE_NAME={solid:'твёрдое',melting:'плавление',liquid:'жидкое',boiling:'кипение',gas:'пар'};
+const PHASE_COLOR={solid:'#8FC7EA',melting:'#B9DDE6',liquid:'#3E9BD6',boiling:'#CFE9EF',gas:'#E7EEF2'};
+function bodyState(it){
+  const mat=MATERIALS[(it.props&&it.props.material)||'water'];
+  const mass=Math.max(0.001,(it.props&&it.props.mass)||0.1);
+  const Q=(it.props&&it.props.energyJoules)||0;
+  return {...tempFromEnergy(mat,mass,Q),mat,mass};
+}
+/** Нагреватели, действующие на тело — по перекрытию областей (с запасом
+    в четверть их размера, чтобы не требовалось попиксельно точного
+    совмещения): суммируем мощность всех задевающих, как и положено при
+    нескольких источниках тепла сразу. */
+function heatersOn(body){
+  const bx=body.x+body.w/2,by=body.y+body.h/2,br=Math.max(body.w,body.h)/2;
+  let power=0,any=false;
+  for(const it of items){
+    if(it.type!=='physics'||it.kind!=='heater')continue;
+    const hx=it.x+it.w/2,hy=it.y+it.h/2,hr=Math.max(it.w,it.h)/2;
+    if(Math.hypot(hx-bx,hy-by)<(br+hr)*0.85){power+=(it.props&&it.props.power)||500;any=true;}
+  }
+  return {power,any};
+}
+const thermalHistory=new Map();             // id → [{t,temp}] — только для графика, локально у зрителя
+let thermalLastTick=performance.now();
+/** Единственное место, где на доске течёт настоящее время: раз в ~400мс
+    проверяем, кого сейчас греют, добавляем прошедшую энергию и секунды.
+    Тикает у всех — и у зрителя тоже, иначе он не увидит, как меняется
+    температура, — но пишет обратно на сервер только тот, кому разрешено
+    редактировать: иначе каждый зритель слал бы свою правку одновременно. */
+function thermalTick(){
+  const now=performance.now();
+  const dt=Math.min(2,(now-thermalLastTick)/1000);
+  thermalLastTick=now;
+  if(!S.boardId||dt<=0)return;
+  let any=false;
+  for(const it of items){
+    if(it.type!=='physics'||it.kind!=='body')continue;
+    const {power,any:touching}=heatersOn(it);
+    const started=it.props&&it.props.started;
+    if(!touching&&!started)continue;
+    any=true;
+    const p=it.props||(it.props={material:'water',mass:0.1,energyJoules:0,elapsedSeconds:0});
+    p.started=true;
+    p.elapsedSeconds=(p.elapsedSeconds||0)+dt;
+    if(touching)p.energyJoules=(p.energyJoules||0)+power*dt;
+    it.bbox=null;
+    const st=bodyState(it);
+    let hist=thermalHistory.get(it.id);
+    if(!hist)thermalHistory.set(it.id,hist=[]);
+    hist.push({t:p.elapsedSeconds,temp:st.temp});
+    if(hist.length>800)hist.splice(0,hist.length-800);
+    it._thermalDirty=(it._thermalDirty||0)+dt;
+    if(canEdit()&&it._thermalDirty>1.2){
+      it._thermalDirty=0;
+      net.send({t:'move',id:it.id,props:{...p}});
+    }
+  }
+  if(any)drawBoard();
+}
+setInterval(thermalTick,400);
+
+function paintHeater(ctx,it){
+  const cx=it.x+it.w/2,cy=it.y+it.h/2,rot=it.rot||0,w=it.w,h=it.h;
+  ctx.save();ctx.translate(cx,cy);ctx.rotate(rot);
+  ctx.fillStyle='#3A3D42';ctx.fillRect(-w/2,h*0.15,w,h*0.35);
+  ctx.fillStyle='#D8433A';
+  for(let i=0;i<3;i++){
+    const fx=-w*0.3+i*w*0.3;
+    ctx.beginPath();
+    ctx.moveTo(fx,h*0.15);
+    ctx.quadraticCurveTo(fx-w*0.12,-h*0.1,fx,-h*0.35);
+    ctx.quadraticCurveTo(fx+w*0.12,-h*0.05,fx,h*0.15);
+    ctx.fill();
+  }
+  ctx.fillStyle='#F4A23A';
+  for(let i=0;i<3;i++){
+    const fx=-w*0.3+i*w*0.3;
+    ctx.beginPath();ctx.moveTo(fx,h*0.1);
+    ctx.quadraticCurveTo(fx-w*0.05,-h*0.02,fx,-h*0.18);
+    ctx.quadraticCurveTo(fx+w*0.05,-h*0.02,fx,h*0.1);ctx.fill();
+  }
+  ctx.restore();
+}
+function paintBody(ctx,it){
+  const cx=it.x+it.w/2,cy=it.y+it.h/2,rot=it.rot||0,w=it.w,h=it.h;
+  const st=bodyState(it);
+  ctx.save();ctx.translate(cx,cy);ctx.rotate(rot);
+  ctx.fillStyle=PHASE_COLOR[st.phase];ctx.strokeStyle='rgba(0,0,0,.3)';ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.roundRect(-w/2,-h/2,w,h,6);ctx.fill();ctx.stroke();
+  ctx.fillStyle='#1A1C20';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.font='600 '+Math.round(h*0.24)+'px ui-sans-serif,system-ui,sans-serif';
+  ctx.fillText(Math.round(st.temp)+'°C',0,-h*0.08);
+  ctx.font=Math.round(h*0.14)+'px ui-sans-serif,system-ui,sans-serif';
+  ctx.fillStyle='#4A4E55';
+  ctx.fillText(st.mat.title+' · '+PHASE_NAME[st.phase],0,h*0.26);
+  ctx.restore();
+  if(it.props&&it.props.started)paintHeatingGraph(ctx,it,st);
+}
+/** Мини-график t(τ) рядом с телом — та самая картинка из учебника
+    (наклон — нагрев, плато — фазовый переход). История точек — только у
+    этого зрителя в памяти вкладки: не синхронизируем сам график, только
+    итоговую энергию, из которой в любой момент можно посчитать текущую
+    температуру заново — новый участник увидит верную температуру сразу,
+    а сам график начнёт рисовать с момента, как открыл доску. */
+function paintHeatingGraph(ctx,it,st){
+  const hist=thermalHistory.get(it.id);
+  if(!hist||hist.length<2)return;
+  const gw=Math.max(140,it.w*1.6),gh=70;
+  const gx=it.x+it.w/2-gw/2,gy=it.y+it.h+14;
+  ctx.save();
+  ctx.fillStyle='rgba(247,245,240,.95)';ctx.strokeStyle='rgba(26,28,32,.2)';ctx.lineWidth=1;
+  ctx.beginPath();ctx.roundRect(gx,gy,gw,gh,6);ctx.fill();ctx.stroke();
+  let tMin=hist[0].t,tMax=hist[hist.length-1].t,vMin=hist[0].temp,vMax=hist[0].temp;
+  for(const p of hist){if(p.temp<vMin)vMin=p.temp;if(p.temp>vMax)vMax=p.temp;}
+  if(vMax-vMin<1){vMax+=1;vMin-=1;}
+  if(tMax-tMin<1)tMax=tMin+1;
+  const pad=8,px=t=>gx+pad+(t-tMin)/(tMax-tMin)*(gw-pad*2),
+        py=v=>gy+gh-pad-(v-vMin)/(vMax-vMin)*(gh-pad*2);
+  ctx.strokeStyle='#D8433A';ctx.lineWidth=1.6;ctx.beginPath();
+  hist.forEach((p,i)=>{const x=px(p.t),y=py(p.temp);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+  ctx.stroke();
+  ctx.fillStyle='#8C9199';ctx.font='9px ui-monospace,monospace';ctx.textAlign='left';ctx.textBaseline='alphabetic';
+  ctx.fillText('τ, с',gx+gw-22,gy+gh-2);
+  ctx.restore();
+}
+function paintCalorimeter(ctx,it){
+  const cx=it.x+it.w/2,cy=it.y+it.h/2,w=it.w,h=it.h;
+  const inside=items.filter(o=>o.type==='physics'&&o.kind==='body'&&
+    o.x+o.w/2>it.x&&o.x+o.w/2<it.x+it.w&&o.y+o.h/2>it.y&&o.y+o.h/2<it.y+it.h);
+  ctx.save();
+  ctx.fillStyle='rgba(180,190,200,.25)';ctx.strokeStyle='#8C9199';ctx.lineWidth=2;
+  ctx.beginPath();ctx.roundRect(it.x,it.y,w,h,10);ctx.fill();ctx.stroke();
+  ctx.fillStyle='#4A4E55';ctx.font='600 12px ui-sans-serif,system-ui,sans-serif';
+  ctx.textAlign='center';ctx.textBaseline='top';
+  ctx.fillText('Калориметр',cx,it.y+6);
+  if(inside.length<2){
+    ctx.font='11px ui-sans-serif,system-ui,sans-serif';ctx.fillStyle='#8C9199';
+    ctx.fillText('перетащите сюда два тела',cx,cy-6);
+  }else{
+    // равновесная температура смеси — по сохранению энергии, теплоёмкость
+    // берём под текущую фазу каждого тела (жидкость/пар/твёрдое), а не
+    // всегда одну и ту же: тело, ещё не растаявшее, греет иначе, чем вода
+    let num=0,den=0;
+    for(const b of inside){
+      const st=bodyState(b);
+      const c=st.phase==='gas'?(st.mat.cGas||st.mat.cSolid)
+        :(st.phase==='liquid'||st.phase==='boiling')?(st.mat.cLiquid||st.mat.cSolid)
+        :st.mat.cSolid;
+      num+=st.mass*c*st.temp; den+=st.mass*c;
+    }
+    const tEq=den>0?num/den:0;
+    ctx.font='600 20px ui-sans-serif,system-ui,sans-serif';ctx.fillStyle='#1A1C20';
+    ctx.fillText(tEq.toFixed(1)+'°C',cx,cy-14);
+    ctx.font='11px ui-sans-serif,system-ui,sans-serif';ctx.fillStyle='#8C9199';
+    ctx.fillText('температура смеси ('+inside.length+' тел.)',cx,cy+12);
+  }
+  ctx.restore();
+}
+
 function paintPhysics(ctx,it){
   const cx=it.x+it.w/2,cy=it.y+it.h/2,rot=it.rot||0;
   if(it.kind==='light-source'){paintSource(ctx,it);return;}
   if(it.kind==='lens'){paintLens(ctx,it);return;}
   if(it.kind==='mirror'){paintMirror(ctx,it);return;}
+  if(it.kind==='heater'){paintHeater(ctx,it);return;}
+  if(it.kind==='body'){paintBody(ctx,it);return;}
+  if(it.kind==='calorimeter'){paintCalorimeter(ctx,it);return;}
   if(it.kind==='magnet'){
     if(!it.props||it.props.showField!==false)paintFieldLines(ctx,it);
     ctx.save();ctx.translate(cx,cy);ctx.rotate(rot);
@@ -2250,7 +2477,14 @@ const PATCHABLE={
   shape:['x','y','w','h','rot','color','size','dash','fill','locked'],
   path:['pts','color','size','dash','fill','a1','a2','locked'],
   pen:['pts','color','size','locked'],
-  marker:['pts','color','size','locked']
+  marker:['pts','color','size','locked'],
+  // physics (магнит/компас/оптика/тепловые) — не было записи вовсе, поэтому
+  // никто, кроме самого автора правки, не видел чужой драг/поворот/ресайз
+  // такого объекта: этот же case 'move' применяет входящие патчи и у
+  // остальных участников, а без своей записи в PATCHABLE цикл ниже просто
+  // не находил, какие поля вообще разрешено скопировать. props — здесь же:
+  // без него другие участники не видели бы, как греется чужое тело
+  physics:['x','y','w','h','rot','props','locked']
 };
 
 /* реестры сериализации по типу — новый тип добавляет свою пару функций сюда.
@@ -3300,14 +3534,19 @@ async function placeImage(blob,screenPt){
    поля и т.п.) настраиваются ДО постановки — см. physicsPanel ниже — и
    берутся из черновика S.physicsProps, а не задаются задним числом. */
 const PHYSICS_SIZE={magnet:{w:96,h:34},compass:{w:64,h:64},
-  'light-source':{w:40,h:40},lens:{w:14,h:110},mirror:{w:14,h:130}};
-const PHYSICS_TITLE={magnet:'Магнит',compass:'Компас','light-source':'Источник луча',lens:'Линза',mirror:'Зеркало'};
+  'light-source':{w:40,h:40},lens:{w:14,h:110},mirror:{w:14,h:130},
+  heater:{w:56,h:44},body:{w:90,h:70},calorimeter:{w:180,h:140}};
+const PHYSICS_TITLE={magnet:'Магнит',compass:'Компас','light-source':'Источник луча',lens:'Линза',mirror:'Зеркало',
+  heater:'Нагреватель',body:'Тело',calorimeter:'Калориметр'};
 function placePhysics(kind,w){
   if(!canEdit())return hint('Преподаватель закрыл доску для правок');
   const size=PHYSICS_SIZE[kind]||{w:60,h:60};
   const props=kind==='magnet'?{...S.physicsProps.magnet}
     :kind==='light-source'?{...S.physicsProps['light-source']}
     :kind==='lens'?{focal:(S.physicsSign||1)*Math.abs(S.physicsProps.lens.focal)}
+    :kind==='heater'?{...S.physicsProps.heater}
+    :kind==='body'?{material:S.physicsProps.body.material,mass:S.physicsProps.body.mass,
+                    energyJoules:0,elapsedSeconds:0,started:false}
     :{};
   const it={id:newId(),by:S.me&&S.me.uid,type:'physics',kind,
             x:w.x-size.w/2,y:w.y-size.h/2,w:size.w,h:size.h,rot:0,locked:false,props};
@@ -3335,6 +3574,8 @@ function updatePhysicsPanel(){
   document.getElementById('physicsMagnetRow').classList.toggle('hidden',kind!=='magnet');
   document.getElementById('physicsSourceRow').classList.toggle('hidden',kind!=='light-source');
   document.getElementById('physicsLensRow').classList.toggle('hidden',kind!=='lens');
+  document.getElementById('physicsHeaterRow').classList.toggle('hidden',kind!=='heater');
+  document.getElementById('physicsBodyRow').classList.toggle('hidden',kind!=='body');
   if(kind==='magnet'){
     const p=S.physicsProps.magnet;
     document.getElementById('physShowField').checked=p.showField;
@@ -3349,6 +3590,14 @@ function updatePhysicsPanel(){
   }else if(kind==='lens'){
     document.getElementById('physFocal').value=S.physicsProps.lens.focal;
     document.getElementById('physFocalVal').textContent=Math.round(S.physicsProps.lens.focal);
+  }else if(kind==='heater'){
+    document.getElementById('physPower').value=S.physicsProps.heater.power;
+    document.getElementById('physPowerVal').textContent=Math.round(S.physicsProps.heater.power);
+  }else if(kind==='body'){
+    const p=S.physicsProps.body;
+    document.getElementById('physMaterial').value=p.material;
+    document.getElementById('physMass').value=p.mass*1000;
+    document.getElementById('physMassVal').textContent=Math.round(p.mass*1000);
   }
 }
 document.getElementById('physicsPanelClose').onclick=()=>setTool('select');
@@ -3372,6 +3621,17 @@ document.getElementById('physFocal').oninput=e=>{
   const v=+e.target.value;
   S.physicsProps.lens.focal=v;
   document.getElementById('physFocalVal').textContent=Math.round(v);
+};
+document.getElementById('physPower').oninput=e=>{
+  const v=+e.target.value;
+  S.physicsProps.heater.power=v;
+  document.getElementById('physPowerVal').textContent=Math.round(v);
+};
+document.getElementById('physMaterial').onchange=e=>{S.physicsProps.body.material=e.target.value;};
+document.getElementById('physMass').oninput=e=>{
+  const g=+e.target.value;
+  S.physicsProps.body.mass=g/1000;
+  document.getElementById('physMassVal').textContent=Math.round(g);
 };
 
 addEventListener('paste',async e=>{
@@ -3600,7 +3860,14 @@ const EXTRA_TOOLS={
       icon:'<svg viewBox="0 0 24 24"><path d="M4 20L18 6"/><path d="M18 6l-5 1M18 6l-1 5"/></svg>'},
   ]},
   mechanics:{title:'Механика',tools:[]},
-  thermal:{title:'Тепловые явления',tools:[]},
+  thermal:{title:'Тепловые явления',tools:[
+    {id:'heater',mode:'physics',physicsKind:'heater',title:'Нагреватель — греет тело рядом',
+      icon:'<svg viewBox="0 0 24 24"><path d="M7 20h10"/><path d="M9 20c-1-2 1-3 0-6 1 1 3 2 2 4"/><path d="M13 20c-1-2 1-3 0-6 1 1 3 2 2 4"/></svg>'},
+    {id:'body',mode:'physics',physicsKind:'body',title:'Тело — вещество с массой и температурой',
+      icon:'<svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="12" rx="2"/><path d="M9 7V5h6v2"/></svg>'},
+    {id:'calorimeter',mode:'physics',physicsKind:'calorimeter',title:'Калориметр — смешать два тела',
+      icon:'<svg viewBox="0 0 24 24"><path d="M8 3h8"/><path d="M9 3v6l-4 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-4-9V3"/></svg>'},
+  ]},
   electromagnetism:{title:'Электромагнетизм',tools:[
     {id:'magnet',mode:'physics',physicsKind:'magnet',title:'Магнит — поставьте на доску',
       icon:'<svg viewBox="0 0 24 24"><rect x="3" y="8" width="8" height="8" rx="1" fill="#D8433A" stroke="none"/><rect x="13" y="8" width="8" height="8" rx="1" fill="#2F6FE0" stroke="none"/></svg>'},
