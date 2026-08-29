@@ -1314,16 +1314,29 @@ function reflectDir(D,n){
     при постановке инструментом, не подписью пользователя). Формула точна
     для параксиальных (малых) углов; как и во всех интерактивных
     тренажёрах оптики, здесь её применяют и к обычным углам ради наглядной
-    картинки, а не строгого хода луча через реальную кривизну стекла. */
+    картинки, а не строгого хода луча через реальную кривизну стекла.
+
+    θ считается не от мировой оси it.rot, а от направления, вдоль которого
+    ЭТОТ луч фактически движется (u или -u — с какой стороны падает свет):
+    линза физически симметрична и должна одинаково собирать/рассеивать
+    свет что слева, что справа. Раньше θ всегда мерился от +u — для луча,
+    идущего справа налево (тот же h, но угол около ±π вместо около нуля),
+    коррекция «θ-h/f» через простое сложение мировых углов заворачивала в
+    обратную сторону, и рассеивающая линза при взгляде с той стороны вела
+    себя как собирающая (и наоборот). */
 function refractThroughLens(it,point,D){
   const cx=it.x+it.w/2,cy=it.y+it.h/2,rot=it.rot||0;
-  const perp={x:-Math.sin(rot),y:Math.cos(rot)};
-  const h=(point.x-cx)*perp.x+(point.y-cy)*perp.y;
+  const u={x:Math.cos(rot),y:Math.sin(rot)};        // оптическая ось
+  const n={x:-u.y,y:u.x};                            // поперёк линзы — по ней меряется h
+  const h=(point.x-cx)*n.x+(point.y-cy)*n.y;
+  const sgn=(D.x*u.x+D.y*u.y)>=0?1:-1;               // с какой стороны идёт луч
+  const fwd={x:sgn*u.x,y:sgn*u.y};                   // «вперёд» именно для этого луча
+  const along=D.x*fwd.x+D.y*fwd.y, across=D.x*n.x+D.y*n.y;
+  const theta=Math.atan2(across,along);
   const focal=(it.props&&it.props.focal)||140;
-  const theta=Math.atan2(D.y,D.x)-rot;
   const theta2=theta-h/focal;
-  const a=rot+theta2;
-  return {x:Math.cos(a),y:Math.sin(a)};
+  const c=Math.cos(theta2),s=Math.sin(theta2);
+  return {x:c*fwd.x+s*n.x,y:c*fwd.y+s*n.y};
 }
 const RAY_ESCAPE=1400, RAY_MAX_BOUNCES=6;
 function opticalElements(){
