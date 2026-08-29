@@ -977,7 +977,8 @@ function cleanPhysicsProps(kind, props) {
   const p = props && typeof props === 'object' ? props : {};
   if (kind === 'magnet') {
     const s = Number.isFinite(+p.strength) ? +p.strength : 1;
-    return { strength: Math.max(0.2, Math.min(3, s)) };
+    // строгих Тесла тут нет — школьная модель условна, но подписана в Тл на панели
+    return { strength: Math.max(0.2, Math.min(3, s)), showField: p.showField !== false };
   }
   return {};
 }

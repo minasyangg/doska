@@ -493,6 +493,25 @@
   </div>
 </div>
 
+<!-- Свойства физического объекта — настраиваются ДО того, как объект
+     появился на доске: открывается сразу по выбору в доп.меню, клик по
+     холсту ставит объект уже с этими значениями. -->
+<div class="pen hidden" id="physicsPanel">
+  <div style="display:flex;align-items:center;gap:6px">
+    <div class="label" id="physicsPanelTitle" style="flex:1">Объект</div>
+    <button class="x" id="physicsPanelClose" title="Отменить (Esc)">×</button>
+  </div>
+  <div id="physicsMagnetRow" class="hidden">
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);margin-bottom:11px;cursor:pointer">
+      <input type="checkbox" id="physShowField" style="width:16px;height:16px;accent-color:#fff">
+      Показывать магнитное поле
+    </label>
+    <div class="label" style="margin-bottom:5px">Сила поля <span id="physStrengthVal" style="color:var(--text)">1.0</span> Тл</div>
+    <input type="range" id="physStrength" min="0.2" max="3" step="0.1" value="1">
+  </div>
+  <div class="label" style="margin-top:9px;font-size:11.5px">Кликните по доске, чтобы поставить.</div>
+</div>
+
 <!-- Верхняя панель свёрнута в значки и уведена в правый угол: холст важнее
      подписей, а что делает кнопка, видно по значку и подсказке. Название
      доски осталось текстом — по нему её узнают и по нему же переименовывают. -->
@@ -659,6 +678,11 @@ const S={tool:'pen',size:4,color:PENS[0],penColor:PENS[0],markerColor:MARKERS[0]
   physicsPreset:null,
   // какой объект-симуляцию ставит инструмент «physics» (магнит/компас/…)
   physicsKind:null,
+  // черновик физ.свойств объекта — настраивается в physicsPanel ДО того, как
+  // объект появится на доске (клик по холсту ставит его уже с этими
+  // значениями); хранится по kind, чтобы настройки одного вида не сбивали
+  // другой
+  physicsProps:{magnet:{strength:1,showField:true}},
   // настройки инструмента открываются по требованию и закрыты при загрузке
   panelOpen:false};
 
@@ -1087,6 +1111,17 @@ function paintItem(ctx,it){
    каждое движение любого объекта (свой драг или чужой 'move') — значит
    стрелка компаса всегда считается по самым свежим координатам магнитов. */
 const physicsAngleCache=new Map();          // id → последний посчитанный угол (только рендер, не грузится в сеть)
+/** Полюса магнита в мировых координатах, одна формула на всё приложение —
+    ей пользуются и расчёт поля, и трассировка силовых линий, и (раньше) её
+    дублировали в двух местах с противоположным знаком, отчего стрелка
+    компаса реагировала правильно только с одной стороны магнита. N — под
+    красной половиной корпуса, S — под синей (см. paintPhysics: красная
+    половина рисуется в локальных x от -w/2 до 0, синяя — от 0 до w/2). */
+function magnetPoles(it){
+  const cx=it.x+it.w/2,cy=it.y+it.h/2,rot=it.rot||0;
+  const half=it.w/2*0.72,dir={x:Math.cos(rot),y:Math.sin(rot)};
+  return { N:{x:cx-dir.x*half,y:cy-dir.y*half}, S:{x:cx+dir.x*half,y:cy+dir.y*half} };
+}
 /** Поле одного полюса в точке (px,py): убывает как 1/r², направлено от
     полюса наружу (sign=+1 у north, -1 у south) — стандартное школьное
     приближение поля стержневого магнита двумя точечными полюсами. */
@@ -1096,18 +1131,17 @@ function poleField(px,py,pole,sign,strength){
   return {x:dx/d*k,y:dy/d*k};
 }
 /** Суммарное магнитное поле в мировой точке (px,py) от всех магнитов на
-    доске — суперпозиция вкладов, как и должно быть у нескольких магнитов
-    сразу. Плюс слабое фоновое поле «на север» (вверх), чтобы стрелка не
-    висела на нуле, когда рядом нет ни одного магнита — как у настоящего
-    компаса вдали от источников. */
-function fieldAt(px,py,excludeId){
+    доске — суперпозиция вкладов: с двумя и более магнитами линии одного
+    правильно огибают и притягиваются/отталкиваются от полюсов другого,
+    потому что здесь честно складываются вклады всех сразу, а не одного
+    ближайшего. Плюс слабое фоновое поле «на север» (вверх), чтобы стрелка
+    компаса не висела на нуле, когда рядом нет ни одного магнита. */
+function fieldAt(px,py){
   let fx=0,fy=-6;                            // фон: слабо тянет «на север» (вверх)
   for(const it of items){
-    if(it.type!=='physics'||it.kind!=='magnet'||it.id===excludeId)continue;
-    const cx=it.x+it.w/2,cy=it.y+it.h/2,rot=it.rot||0;
-    const half=it.w/2*0.72,dir={x:Math.cos(rot),y:Math.sin(rot)};
+    if(it.type!=='physics'||it.kind!=='magnet')continue;
+    const {N,S}=magnetPoles(it);
     const strength=(it.props&&it.props.strength)||1;
-    const N={x:cx+dir.x*half,y:cy+dir.y*half}, S={x:cx-dir.x*half,y:cy-dir.y*half};
     const fN=poleField(px,py,N,1,strength), fS=poleField(px,py,S,-1,strength);
     fx+=fN.x+fS.x; fy+=fN.y+fS.y;
   }
@@ -1118,16 +1152,88 @@ function fieldAt(px,py,excludeId){
     в шум там, где поле почти нулевое (не персистится, не едет по сети). */
 function compassAngle(it){
   const cx=it.x+it.w/2,cy=it.y+it.h/2;
-  const f=fieldAt(cx,cy,it.id);
+  const f=fieldAt(cx,cy);
   const mag=Math.hypot(f.x,f.y);
   if(mag<0.5)return physicsAngleCache.get(it.id)||0;
   const ang=Math.atan2(f.y,f.x);
   physicsAngleCache.set(it.id,ang);
   return ang;
 }
+
+/* ── силовые линии магнита ──────────────────────────────────
+   Классическая трассировка: из точек по кругу вокруг N-полюса шагаем вдоль
+   направления локального поля (суммарного — от всех магнитов сразу), пока
+   не подойдём вплотную к чьему-нибудь S-полюсу (линия «дошла» — обычная
+   картина для одного магнита, его же линия замыкается на его же S) или не
+   выйдем за разумную длину (для одиночного магнита часть линий просто
+   уходит во внешнее пространство — рисуем с затуханием, как в учебнике).
+   Из-за общей fieldAt() трассировка сама переигрывается, когда магнитов
+   двое и больше: линии одного гнутся к полюсам соседнего. Кэш по подписи
+   всех магнитов сразу — чтобы не тратить это на каждый кадр, если на доске
+   просто рисуют ручкой в стороне. */
+const FIELD_LINES=10, FIELD_STEP=6, FIELD_MAX_STEPS=140, FIELD_SINK=7;
+function nearestSouthDist(p){
+  let best=Infinity;
+  for(const it of items){
+    if(it.type!=='physics'||it.kind!=='magnet')continue;
+    const S=magnetPoles(it).S;
+    const d=Math.hypot(p.x-S.x,p.y-S.y);
+    if(d<best)best=d;
+  }
+  return best;
+}
+function traceFieldLines(it){
+  const {N}=magnetPoles(it), R0=Math.max(6,it.h*0.32);
+  const lines=[];
+  for(let i=0;i<FIELD_LINES;i++){
+    const a=(i/FIELD_LINES)*6.2832;
+    let p={x:N.x+Math.cos(a)*R0,y:N.y+Math.sin(a)*R0};
+    const pts=[p];
+    for(let step=0;step<FIELD_MAX_STEPS;step++){
+      const f=fieldAt(p.x,p.y);
+      const mag=Math.hypot(f.x,f.y)||1e-6;
+      p={x:p.x+f.x/mag*FIELD_STEP,y:p.y+f.y/mag*FIELD_STEP};
+      pts.push(p);
+      if(nearestSouthDist(p)<FIELD_SINK)break;
+    }
+    lines.push(pts);
+  }
+  return lines;
+}
+let physicsFieldCache={sig:'',lines:new Map()};
+function magnetsSignature(){
+  let s='';
+  for(const it of items) if(it.type==='physics'&&it.kind==='magnet')
+    s+=it.id+':'+it.x.toFixed(1)+','+it.y.toFixed(1)+','+(it.rot||0).toFixed(3)+
+       ','+((it.props&&it.props.strength)||1)+';';
+  return s;
+}
+function fieldLinesFor(it){
+  const sig=magnetsSignature();
+  if(physicsFieldCache.sig!==sig)physicsFieldCache={sig,lines:new Map()};
+  if(!physicsFieldCache.lines.has(it.id))physicsFieldCache.lines.set(it.id,traceFieldLines(it));
+  return physicsFieldCache.lines.get(it.id);
+}
+function paintFieldLines(ctx,it){
+  const lines=fieldLinesFor(it);
+  ctx.save();
+  ctx.strokeStyle='rgba(90,120,190,.55)';ctx.lineWidth=1.2;
+  ctx.lineCap='round';ctx.lineJoin='round';
+  for(const pts of lines){
+    if(pts.length<2)continue;
+    ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
+    for(let i=1;i<pts.length;i++)ctx.lineTo(pts[i].x,pts[i].y);
+    ctx.stroke();
+    const mid=Math.floor(pts.length/2);
+    if(mid>0)drawArrowhead(ctx,pts[mid-1],pts[mid],2,2.4,'rgba(90,120,190,.85)');
+  }
+  ctx.restore();
+}
+
 function paintPhysics(ctx,it){
   const cx=it.x+it.w/2,cy=it.y+it.h/2,rot=it.rot||0;
   if(it.kind==='magnet'){
+    if(!it.props||it.props.showField!==false)paintFieldLines(ctx,it);
     ctx.save();ctx.translate(cx,cy);ctx.rotate(rot);
     const w=it.w,h=it.h;
     ctx.fillStyle='#D8433A';ctx.fillRect(-w/2,-h/2,w/2,h);
@@ -2958,21 +3064,51 @@ async function placeImage(blob,screenPt){
 
 /* Объект-симуляция ставится кликом, как штамп — без загрузки файла, размер
    фиксирован под конкретный вид. Дальше это обычный box-объект: тянется,
-   вращается, ресайзится теми же ручками, что и картинка. */
+   вращается, ресайзится теми же ручками, что и картинка. Свойства (сила
+   поля и т.п.) настраиваются ДО постановки — см. physicsPanel ниже — и
+   берутся из черновика S.physicsProps, а не задаются задним числом. */
 const PHYSICS_SIZE={magnet:{w:96,h:34},compass:{w:64,h:64}};
 const PHYSICS_TITLE={magnet:'Магнит',compass:'Компас'};
 function placePhysics(kind,w){
   if(!canEdit())return hint('Преподаватель закрыл доску для правок');
   const size=PHYSICS_SIZE[kind]||{w:60,h:60};
+  const props=kind==='magnet'?{...S.physicsProps.magnet}:{};
   const it={id:newId(),by:S.me&&S.me.uid,type:'physics',kind,
-            x:w.x-size.w/2,y:w.y-size.h/2,w:size.w,h:size.h,rot:0,locked:false,
-            props:kind==='magnet'?{strength:1}:{}};
+            x:w.x-size.w/2,y:w.y-size.h/2,w:size.w,h:size.h,rot:0,locked:false,props};
   addItem(it);
   undoStack.push({type:'add',item:it});redoStack.length=0;
   net.send({t:'add',item:deflate(it)});
   setTool('select');select(it);
   hint((PHYSICS_TITLE[kind]||'Объект')+' поставлен: тяните и вращайте как обычно');
 }
+
+/* Панель свойств физ.объекта открывается ДО того, как он появился на доске:
+   выбор в доп.меню сразу переводит в инструмент «physics» и показывает эту
+   панель — клик по холсту ставит объект уже с выбранными значениями.
+   Значения живут в S.physicsProps (черновик на весь сеанс, как цвет пера) —
+   выбрали один раз, ставите следующий магнит уже с той же силой поля. */
+function updatePhysicsPanel(){
+  const panel=document.getElementById('physicsPanel');
+  const on=S.tool==='physics'&&!!S.physicsKind&&!!S.boardId;
+  panel.classList.toggle('hidden',!on);
+  if(!on)return;
+  document.getElementById('physicsPanelTitle').textContent=PHYSICS_TITLE[S.physicsKind]||'Объект';
+  const isMagnet=S.physicsKind==='magnet';
+  document.getElementById('physicsMagnetRow').classList.toggle('hidden',!isMagnet);
+  if(isMagnet){
+    const p=S.physicsProps.magnet;
+    document.getElementById('physShowField').checked=p.showField;
+    document.getElementById('physStrength').value=p.strength;
+    document.getElementById('physStrengthVal').textContent=p.strength.toFixed(1);
+  }
+}
+document.getElementById('physicsPanelClose').onclick=()=>setTool('select');
+document.getElementById('physShowField').onchange=e=>{S.physicsProps.magnet.showField=e.target.checked;};
+document.getElementById('physStrength').oninput=e=>{
+  const v=+e.target.value;
+  S.physicsProps.magnet.strength=v;
+  document.getElementById('physStrengthVal').textContent=v.toFixed(1);
+};
 
 addEventListener('paste',async e=>{
   if(!S.boardId)return;                       // состояние роутера, а не вид DOM
@@ -3400,6 +3536,7 @@ function setTool(t){
     document.getElementById('a1Sel').value=S.a1;
     document.getElementById('a2Sel').value=S.a2;
   }
+  updatePhysicsPanel();
   applyCursor();drawLive();
 }
 document.querySelectorAll('.tool[data-tool]').forEach(b=>b.onclick=()=>{
@@ -4146,7 +4283,10 @@ addEventListener('keydown',e=>{
   if(c==='Equal'){zoomAt(board.clientWidth/2,board.clientHeight/2,1.25);resyncPanning({x:board.clientWidth/2,y:board.clientHeight/2});}
   if(c==='Minus'){zoomAt(board.clientWidth/2,board.clientHeight/2,0.8);resyncPanning({x:board.clientWidth/2,y:board.clientHeight/2});}
   if((c==='Delete'||c==='Backspace')&&selection.length){e.preventDefault();document.getElementById('selDel').click();}
-  if(c==='Escape'){abortDraft();select(null);closeAllPopovers();S.panelOpen=false;updatePenPanel();}
+  if(c==='Escape'){
+    abortDraft();select(null);closeAllPopovers();S.panelOpen=false;updatePenPanel();
+    if(S.tool==='physics')setTool('select');
+  }
 });
 addEventListener('keyup',e=>{if(e.code==='Space'){spaceDown=false;applyCursor();}});
 addEventListener('resize',()=>{resize();refreshSelBar();});
@@ -4716,7 +4856,7 @@ function askName(){
   });
 }
 
-const boardUi=['dock','cornerTools','penPanel','topBar','zoombar','hint'];
+const boardUi=['dock','cornerTools','penPanel','physicsPanel','topBar','zoombar','hint'];
 function showView(what){
   dash.classList.toggle('hidden',what!=='dash');
   loginEl.classList.toggle('hidden',what!=='login');
