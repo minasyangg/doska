@@ -974,10 +974,14 @@ function cleanPath(p, by) {
    этим координатам, серверу знать её не нужно. */
 // оптика (источник/линза/зеркало) — та же геометрия x,y,w,h,rot, что и у
 // магнита/компаса, лучи и преломление считает клиент по этим координатам
-// тепловые (нагреватель/тело/калориметр) — единственные, у кого props
+// тепловые (нагреватель/тело/калориметр) и график — те, у кого props
 // меняются уже после постановки (energyJoules у тела растёт, пока рядом
-// греет нагреватель), см. PATCH_CLAMP.physics.props ниже
-const PHYSICS_KINDS = new Set(['magnet', 'compass', 'light-source', 'lens', 'mirror', 'heater', 'body', 'calorimeter']);
+// греет нагреватель; вид и список формул графика правятся постоянно),
+// см. PATCH_CLAMP.physics.props ниже. Сама формула — просто строка: её
+// парсит и считает клиент своим кодом (см. graphParse в index.html), а не
+// eval/new Function — сервер её не выполняет и не проверяет на валидность,
+// только на размер.
+const PHYSICS_KINDS = new Set(['magnet', 'compass', 'light-source', 'lens', 'mirror', 'heater', 'body', 'calorimeter', 'graph']);
 const BODY_MATERIALS = new Set(['water', 'copper', 'aluminum', 'lead', 'steel']);
 function cleanPhysicsProps(kind, props) {
   const p = props && typeof props === 'object' ? props : {};
@@ -1013,6 +1017,22 @@ function cleanPhysicsProps(kind, props) {
       elapsedSeconds: Math.max(0, Math.min(1e7, elapsed)),
       started: !!p.started,
     };
+  }
+  if (kind === 'graph') {
+    const v = p.view && typeof p.view === 'object' ? p.view : {};
+    const view = {
+      cx: Number.isFinite(+v.cx) ? +v.cx : 0,
+      cy: Number.isFinite(+v.cy) ? +v.cy : 0,
+      scale: Math.max(4, Math.min(4000, Number.isFinite(+v.scale) ? +v.scale : 40)),
+    };
+    const list = Array.isArray(p.expressions) ? p.expressions.slice(0, 8) : [];
+    const expressions = list.map(e => ({
+      id: (e && typeof e.id === 'string' && e.id) ? e.id.slice(0, 32) : rnd(8),
+      text: (e && typeof e.text === 'string') ? e.text.slice(0, 200) : '',
+      color: (e && typeof e.color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(e.color)) ? e.color : '#2F6FE0',
+      visible: !(e && e.visible === false),
+    }));
+    return { view, expressions };
   }
   return {};
 }

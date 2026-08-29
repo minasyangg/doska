@@ -108,7 +108,8 @@
 
   .pen{position:fixed;left:74px;top:50%;transform:translateY(-50%);background:var(--panel);
     border:1px solid var(--edge);border-radius:var(--r);padding:12px;width:186px;display:flex;
-    flex-direction:column;gap:11px;box-shadow:0 14px 40px rgba(15,17,20,.28);z-index:10}
+    flex-direction:column;gap:11px;box-shadow:0 14px 40px rgba(15,17,20,.28);z-index:10;
+    max-height:calc(100vh - 24px);overflow-y:auto}
   .label{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
   .pen .x{background:none;border:0;color:var(--muted);cursor:pointer;font-size:16px;line-height:1;padding:0 4px}
   .pen .x:hover{color:#E4796F}
@@ -535,7 +536,13 @@
     <div class="label" style="margin-bottom:5px">Масса <span id="physMassVal" style="color:var(--text)">100</span> г</div>
     <input type="range" id="physMass" min="10" max="1000" step="10" value="100">
   </div>
-  <div class="label" style="margin-top:9px;font-size:11.5px">Кликните по доске, чтобы поставить.</div>
+  <!-- у графика нет настроек до постановки — список функций появляется
+       после, когда объект уже выделен на доске (см. renderGraphExpressions) -->
+  <div id="physicsGraphRow" class="hidden">
+    <div id="physicsExprList"></div>
+    <button class="mini" id="physGraphAdd" style="background:var(--panel-2);width:100%;margin-top:2px">+ Добавить функцию</button>
+  </div>
+  <div class="label" id="physicsPlaceHint" style="margin-top:9px;font-size:11.5px">Кликните по доске, чтобы поставить.</div>
 </div>
 
 <!-- Верхняя панель свёрнута в значки и уведена в правый угол: холст важнее
@@ -1683,6 +1690,207 @@ function paintCalorimeter(ctx,it){
   ctx.restore();
 }
 
+/* ── график функций (раздел «Математика» в доп.меню) ─────────────
+   Свой парсер и вычислитель вместо стороннего math.js/eval: доска —
+   один файл без зависимостей и без сборки, а главное — выражение это
+   данные, долетающие до ЧУЖОГО браузера через синхронизацию (as-is
+   строка от другого участника). eval/new Function от неё means
+   исполнение чужого кода у себя в вкладке — недопустимо. Здесь строится
+   свой AST, и обходит его тоже свой код: выполнить что-то, кроме
+   арифметики и разрешённых функций, через это невозможно, что бы ни было
+   в исходной строке.
+
+   Рендер — тот же приём, что у силовых линий и лучей: сэмплируем функцию
+   по x и рисуем полилинию, только на этот раз холст — это ПОДокно со
+   своими координатами (view.cx/cy/scale), не мировыми координатами
+   доски. Прецедента вложенной камеры в приложении раньше не было (весь
+   рендер идёт в одной applyCam()-трансформации) — это первый объект,
+   которому она нужна: масштаб доски масштабирует график целиком (как
+   картинку), a view.scale — зум ВНУТРИ графика, независимый от него. */
+const GRAPH_COLORS=['#2F6FE0','#D8433A','#2E9B62','#B36D1F','#8A4FC9'];
+const GRAPH_FUNCS={
+  sin:Math.sin,cos:Math.cos,tan:Math.tan,
+  asin:Math.asin,acos:Math.acos,atan:Math.atan,
+  sqrt:Math.sqrt,abs:Math.abs,exp:Math.exp,
+  ln:Math.log,log:Math.log10,
+};
+const GRAPH_CONSTS={pi:Math.PI,e:Math.E};
+function graphTokenize(src){
+  const toks=[];let i=0;
+  while(i<src.length){
+    const c=src[i];
+    if(/\s/.test(c)){i++;continue;}
+    if(/[0-9.]/.test(c)){
+      let j=i+1;while(j<src.length&&/[0-9.]/.test(src[j]))j++;
+      toks.push({t:'num',v:parseFloat(src.slice(i,j))});i=j;continue;
+    }
+    if(/[a-zA-Zа-яёА-ЯЁ]/.test(c)){
+      let j=i+1;while(j<src.length&&/[a-zA-Zа-яёА-ЯЁ0-9]/.test(src[j]))j++;
+      toks.push({t:'id',v:src.slice(i,j).toLowerCase()});i=j;continue;
+    }
+    if('+-*/^(),'.includes(c)){toks.push({t:c});i++;continue;}
+    throw new Error('непонятный символ «'+c+'»');
+  }
+  return toks;
+}
+/** Рекурсивный спуск с неявным умножением: "2x", "2(x+1)", "2sin(x)" —
+    в цикле parseTerm любой следующий множитель без явного *narrow
+    считается умножением, если с него вообще может начаться выражение. */
+function graphParse(src){
+  const toks=graphTokenize(src.replace(/^\s*y\s*=/i,''));
+  let pos=0;
+  const peek=()=>toks[pos];
+  const startsFactor=t=>!!t&&(t.t==='num'||t.t==='id'||t.t==='(');
+  function parseExpr(){
+    let node=parseTerm();
+    while(peek()&&(peek().t==='+'||peek().t==='-')){
+      const op=toks[pos++].t;
+      node={t:op,a:node,b:parseTerm()};
+    }
+    return node;
+  }
+  function parseTerm(){
+    let node=parseUnary();
+    while(peek()&&(peek().t==='*'||peek().t==='/'||startsFactor(peek()))){
+      let op='*';
+      if(peek().t==='*'||peek().t==='/')op=toks[pos++].t;
+      node={t:op,a:node,b:parseUnary()};
+    }
+    return node;
+  }
+  function parseUnary(){
+    if(peek()&&peek().t==='-'){pos++;return {t:'neg',a:parseUnary()};}
+    if(peek()&&peek().t==='+'){pos++;return parseUnary();}
+    return parsePower();
+  }
+  function parsePower(){
+    const base=parseFactor();
+    if(peek()&&peek().t==='^'){pos++;return {t:'^',a:base,b:parseUnary()};}
+    return base;
+  }
+  function parseFactor(){
+    const tk=peek();
+    if(!tk)throw new Error('неожиданный конец выражения');
+    if(tk.t==='num'){pos++;return {t:'num',v:tk.v};}
+    if(tk.t==='('){
+      pos++;const e=parseExpr();
+      if(!peek()||peek().t!==')')throw new Error('не хватает «)»');
+      pos++;return e;
+    }
+    if(tk.t==='id'){
+      pos++;
+      if(peek()&&peek().t==='('){
+        pos++;
+        const args=[parseExpr()];
+        while(peek()&&peek().t===','){pos++;args.push(parseExpr());}
+        if(!peek()||peek().t!==')')throw new Error('не хватает «)»');
+        pos++;
+        if(!(tk.v in GRAPH_FUNCS))throw new Error('неизвестная функция «'+tk.v+'»');
+        return {t:'call',name:tk.v,args};
+      }
+      if(tk.v==='x')return {t:'var'};
+      if(tk.v in GRAPH_CONSTS)return {t:'num',v:GRAPH_CONSTS[tk.v]};
+      throw new Error('неизвестный символ «'+tk.v+'»');
+    }
+    throw new Error('неожиданный символ');
+  }
+  const ast=parseExpr();
+  if(pos<toks.length)throw new Error('лишние символы в конце');
+  return ast;
+}
+function graphEval(node,x){
+  switch(node.t){
+    case 'num':return node.v;
+    case 'var':return x;
+    case '+':return graphEval(node.a,x)+graphEval(node.b,x);
+    case '-':return graphEval(node.a,x)-graphEval(node.b,x);
+    case '*':return graphEval(node.a,x)*graphEval(node.b,x);
+    case '/':return graphEval(node.a,x)/graphEval(node.b,x);
+    case '^':return Math.pow(graphEval(node.a,x),graphEval(node.b,x));
+    case 'neg':return -graphEval(node.a,x);
+    case 'call':return GRAPH_FUNCS[node.name](...node.args.map(a=>graphEval(a,x)));
+    default:return NaN;
+  }
+}
+const graphAstCache=new Map();               // текст формулы → {ast,error}, чтобы не парсить на каждый сэмпл
+function graphCompile(text){
+  if(graphAstCache.has(text))return graphAstCache.get(text);
+  let result;
+  try{ result={ast:graphParse(text),error:null}; }
+  catch(err){ result={ast:null,error:err.message}; }
+  if(graphAstCache.size>300)graphAstCache.clear();   // защита от утечки, пока кто-то активно печатает
+  graphAstCache.set(text,result);
+  return result;
+}
+/** «Круглый» шаг сетки под текущий масштаб — 1/2/5×10ⁿ, обычный приём для
+    осей графиков: интервалы сами не скачут дробными числами при зуме. */
+function graphNiceStep(rough){
+  const pow10=Math.pow(10,Math.floor(Math.log10(rough)));
+  const f=rough/pow10;
+  const nice=f<1.5?1:f<3?2:f<7?5:10;
+  return nice*pow10;
+}
+const GRAPH_HEADER_H=18;         // полоска сверху — за неё двигают саму рамку, не панорамируют вид
+/** Приблизить/отдалить вид графика к мировой точке (курсор), не сдвигая
+    математическую точку под ним — тот же приём, что у zoomAt() для всей
+    доски, только внутри собственных координат объекта. */
+function zoomGraphAt(it,worldPt,factor){
+  const view=it.props.view;
+  const bx=it.x+it.w/2,by=it.y+it.h/2;
+  const mx=view.cx+(worldPt.x-bx)/view.scale, my=view.cy-(worldPt.y-by)/view.scale;
+  const newScale=Math.max(4,Math.min(4000,view.scale*factor));
+  view.cx=mx-(worldPt.x-bx)/newScale;
+  view.cy=my+(worldPt.y-by)/newScale;
+  view.scale=newScale;
+  it.bbox=null;
+}
+function paintGraph(ctx,it){
+  const view=it.props.view||{cx:0,cy:0,scale:40};
+  const bx=it.x,by=it.y,bw=it.w,bh=it.h;
+  const ccx=bx+bw/2,ccy=by+bh/2;
+  const toSx=mx=>ccx+(mx-view.cx)*view.scale, toSy=my=>ccy-(my-view.cy)*view.scale;
+  const toMx=sx=>view.cx+(sx-ccx)/view.scale, toMy=sy=>view.cy-(sy-ccy)/view.scale;
+  ctx.save();
+  ctx.beginPath();ctx.rect(bx,by,bw,bh);ctx.clip();
+  ctx.fillStyle='#FCFBF8';ctx.fillRect(bx,by,bw,bh);
+  const stepX=graphNiceStep(80/view.scale), stepY=graphNiceStep(80/view.scale);
+  ctx.strokeStyle='rgba(0,0,0,.08)';ctx.lineWidth=1;
+  for(let mx=Math.ceil(toMx(bx)/stepX)*stepX;mx<=toMx(bx+bw);mx+=stepX){
+    const sx=toSx(mx);ctx.beginPath();ctx.moveTo(sx,by);ctx.lineTo(sx,by+bh);ctx.stroke();
+  }
+  for(let my=Math.ceil(toMy(by+bh)/stepY)*stepY;my<=toMy(by);my+=stepY){
+    const sy=toSy(my);ctx.beginPath();ctx.moveTo(bx,sy);ctx.lineTo(bx+bw,sy);ctx.stroke();
+  }
+  ctx.strokeStyle='rgba(0,0,0,.35)';ctx.lineWidth=1.4;
+  const ax=toSx(0);
+  if(ax>=bx&&ax<=bx+bw){ctx.beginPath();ctx.moveTo(ax,by);ctx.lineTo(ax,by+bh);ctx.stroke();}
+  const ay=toSy(0);
+  if(ay>=by&&ay<=by+bh){ctx.beginPath();ctx.moveTo(bx,ay);ctx.lineTo(bx+bw,ay);ctx.stroke();}
+  for(const ex of (it.props.expressions||[])){
+    if(ex.visible===false||!ex.text||!ex.text.trim())continue;
+    const {ast}=graphCompile(ex.text);
+    if(!ast)continue;
+    ctx.strokeStyle=ex.color||GRAPH_COLORS[0];ctx.lineWidth=2;ctx.lineCap='round';ctx.lineJoin='round';
+    ctx.beginPath();
+    let started=false,prevSy=0;
+    for(let sx=bx;sx<=bx+bw;sx+=1.5){
+      let my;try{my=graphEval(ast,toMx(sx));}catch{my=NaN;}
+      const sy=toSy(my);
+      const ok=Number.isFinite(sy)&&sy>by-bh*3&&sy<by+bh*4;
+      if(ok&&started&&Math.abs(sy-prevSy)<bh*1.5)ctx.lineTo(sx,sy);
+      else if(ok){ctx.moveTo(sx,sy);started=true;}
+      else started=false;
+      if(ok)prevSy=sy;
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+  ctx.strokeStyle='rgba(0,0,0,.25)';ctx.lineWidth=1.5;ctx.strokeRect(bx,by,bw,bh);
+  ctx.fillStyle='rgba(0,0,0,.05)';ctx.fillRect(bx,by,bw,GRAPH_HEADER_H);
+  ctx.strokeStyle='rgba(0,0,0,.12)';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(bx,by+GRAPH_HEADER_H);ctx.lineTo(bx+bw,by+GRAPH_HEADER_H);ctx.stroke();
+}
+
 function paintPhysics(ctx,it){
   const cx=it.x+it.w/2,cy=it.y+it.h/2,rot=it.rot||0;
   if(it.kind==='light-source'){paintSource(ctx,it);return;}
@@ -1690,6 +1898,7 @@ function paintPhysics(ctx,it){
   if(it.kind==='mirror'){paintMirror(ctx,it);return;}
   if(it.kind==='heater'){paintHeater(ctx,it);return;}
   if(it.kind==='body'){paintBody(ctx,it);return;}
+  if(it.kind==='graph'){paintGraph(ctx,it);return;}
   if(it.kind==='calorimeter'){paintCalorimeter(ctx,it);return;}
   if(it.kind==='magnet'){
     if(!it.props||it.props.showField!==false)paintFieldLines(ctx,it);
@@ -2582,6 +2791,7 @@ function selectMany(list){
   selection=list.filter(it=>it&&byId.has(it.id));
   selected=selection.length===1?selection[0]:null;
   refreshSelBar();
+  updatePhysicsPanel();          // список формул графика открыт, пока график выделен
   drawLive();
 }
 function select(it){ selectMany(it?[it]:[]); }
@@ -2694,7 +2904,10 @@ function handlesFor(it){
   const midW={x:(corners.nw.x+corners.ne.x)/2,y:(corners.nw.y+corners.ne.y)/2};
   const midS=toScreen(midW.x,midW.y);
   const ux=Math.sin(rot),uy=-Math.cos(rot);
-  handles.push({name:'rot',kind:'rotate',sx:midS.x+ux*24,sy:midS.y+uy*24});
+  // у графика поворот бессмысленен (координатная плоскость всегда прямая) —
+  // ручки вращения у него нет, только обычный ресайз рамки по углам/сторонам
+  if(!(it.type==='physics'&&it.kind==='graph'))
+    handles.push({name:'rot',kind:'rotate',sx:midS.x+ux*24,sy:midS.y+uy*24});
   // отдельные вершины линии/полигона — редактируются независимо от rotate/resize
   if(it.type==='path'){
     it.pts.forEach((p,i)=>{
@@ -2832,6 +3045,15 @@ stage.addEventListener('pointerdown',e=>{
       // клик по уже выделенной группе её сохраняет; объекты одной группы
       // берутся вместе
       if(!inSelection(im))selectMany(withGroup([im]));
+      // у графика тело — это его координатная плоскость: тащат не рамку, а
+      // сам вид (панорама), как в Desmos; переставить рамку целиком можно
+      // только за узкую полоску сверху (см. GRAPH_HEADER_H/paintGraph).
+      // Заблокированный объект не трогаем вовсе — как и обычный перенос,
+      // который startMove ниже сам отфильтрует по .locked.
+      if(im.type==='physics'&&im.kind==='graph'&&!im.locked&&(w.y-im.y)>GRAPH_HEADER_H){
+        dragging={mode:'graphPan',it:im,start:{cx:im.props.view.cx,cy:im.props.view.cy},w0:w};
+        return;
+      }
       startMove(w);
       return;
     }
@@ -2935,6 +3157,16 @@ stage.addEventListener('pointermove',e=>{
         else if(Array.isArray(s0.pts)) t.pts=s0.pts.map(p=>('p' in p)?{x:p.x+dx,y:p.y+dy,p:p.p}:{x:p.x+dx,y:p.y+dy});
         t.bbox=bboxOf(t);
       }
+      drawBoard();refreshSelBar();drawLive();return;
+    }
+    if(dragging.mode==='graphPan'){
+      // та же арифметика, что у панорамы всей доски, только в координатах
+      // объекта и с отражённым Y (в математике «вверх» положительно)
+      const dx=w.x-dragging.w0.x, dy=w.y-dragging.w0.y;
+      const view=dragging.it.props.view, scale=view.scale||40;
+      view.cx=dragging.start.cx-dx/scale;
+      view.cy=dragging.start.cy+dy/scale;
+      dragging.it.bbox=null;
       drawBoard();refreshSelBar();drawLive();return;
     }
     const it=dragging.it,st=dragging.start;
@@ -3135,7 +3367,15 @@ function endPointer(e){
       }
     }
   }
-  if(dragging){
+  if(dragging&&dragging.mode==='graphPan'){
+    // панорама вида — не «содержимое», а состояние камеры графика (как и
+    // S.cam самой доски), поэтому в историю отмен не идёт; отправляем один
+    // раз по отпусканию, а не на каждый pointermove — так же, как обычный
+    // перенос объекта шлёт итоговую позицию только в конце жеста
+    net.send({t:'move',id:dragging.it.id,props:{...dragging.it.props}});
+    dragging=null;
+    refreshSelBar();
+  }else if(dragging){
     // перенос группы — одна запись в истории на весь жест, иначе Ctrl+Z
     // возвращал бы объекты по одному
     const parts=dragging.list||[{it:dragging.it,start:dragging.start}];
@@ -3447,9 +3687,23 @@ const resyncPanning=p=>{
   if(!panning)return;
   panning.cx=S.cam.x;panning.cy=S.cam.y;panning.sx=p.x;panning.sy=p.y;
 };
+let graphZoomSyncTimer=null;
 stage.addEventListener('wheel',e=>{
   e.preventDefault();
   const p=localXY(e);
+  // колесо над графиком крутит его собственный масштаб, а не масштаб всей
+  // доски — так же, как в Desmos: наводишь на график и зумишь именно его
+  if(S.tool==='select'&&!e.shiftKey&&canEdit()){
+    const w0=toWorld(p.x,p.y), g=itemAt(w0);
+    if(g&&g.type==='physics'&&g.kind==='graph'&&!g.locked&&mineOnly(g)){
+      const raw=Math.exp(-e.deltaY*(e.deltaMode===1?0.03:0.0022));
+      zoomGraphAt(g,w0,Math.min(1.22,Math.max(0.82,raw)));
+      drawBoard();
+      clearTimeout(graphZoomSyncTimer);
+      graphZoomSyncTimer=setTimeout(()=>net.send({t:'move',id:g.id,props:{...g.props}}),150);
+      return;
+    }
+  }
   if(e.shiftKey&&!e.ctrlKey){
     S.cam.y-=e.deltaY*(e.deltaMode===1?18:1);
     S.cam.x-=e.deltaX*(e.deltaMode===1?18:1);
@@ -3535,9 +3789,9 @@ async function placeImage(blob,screenPt){
    берутся из черновика S.physicsProps, а не задаются задним числом. */
 const PHYSICS_SIZE={magnet:{w:96,h:34},compass:{w:64,h:64},
   'light-source':{w:40,h:40},lens:{w:14,h:110},mirror:{w:14,h:130},
-  heater:{w:56,h:44},body:{w:90,h:70},calorimeter:{w:180,h:140}};
+  heater:{w:56,h:44},body:{w:90,h:70},calorimeter:{w:180,h:140},graph:{w:280,h:220}};
 const PHYSICS_TITLE={magnet:'Магнит',compass:'Компас','light-source':'Источник луча',lens:'Линза',mirror:'Зеркало',
-  heater:'Нагреватель',body:'Тело',calorimeter:'Калориметр'};
+  heater:'Нагреватель',body:'Тело',calorimeter:'Калориметр',graph:'График'};
 function placePhysics(kind,w){
   if(!canEdit())return hint('Преподаватель закрыл доску для правок');
   const size=PHYSICS_SIZE[kind]||{w:60,h:60};
@@ -3547,6 +3801,8 @@ function placePhysics(kind,w){
     :kind==='heater'?{...S.physicsProps.heater}
     :kind==='body'?{material:S.physicsProps.body.material,mass:S.physicsProps.body.mass,
                     energyJoules:0,elapsedSeconds:0,started:false}
+    :kind==='graph'?{view:{cx:0,cy:0,scale:40},
+                      expressions:[{id:newId(),text:'',color:GRAPH_COLORS[0],visible:true}]}
     :{};
   const it={id:newId(),by:S.me&&S.me.uid,type:'physics',kind,
             x:w.x-size.w/2,y:w.y-size.h/2,w:size.w,h:size.h,rot:0,locked:false,props};
@@ -3557,17 +3813,27 @@ function placePhysics(kind,w){
   hint((PHYSICS_TITLE[kind]||'Объект')+' поставлен: тяните и вращайте как обычно');
 }
 
-/* Панель свойств физ.объекта открывается ДО того, как он появился на доске:
-   выбор в доп.меню сразу переводит в инструмент «physics» и показывает эту
-   панель — клик по холсту ставит объект уже с выбранными значениями.
-   Значения живут в S.physicsProps (черновик на весь сеанс, как цвет пера) —
-   выбрали один раз, ставите следующий магнит уже с той же силой поля. */
+/* Панель свойств физ.объекта. Для всех видов, кроме графика, открывается
+   ДО того, как объект появился на доске: выбор в доп.меню переводит в
+   инструмент «physics» и показывает эту панель — клик по холсту ставит
+   объект уже с выбранными значениями (значения живут в S.physicsProps —
+   черновик на весь сеанс, как цвет пера).
+
+   У графика настраивать до постановки нечего (пустая плоскость), зато
+   после — список формул нужен постоянно, не один раз. Поэтому для kind
+   'graph' эта же панель включается ПОСЛЕ: как только график выделен на
+   доске (обычным инструментом «выделить»), а не только в момент, когда
+   его ставят инструментом «physics» — см. editingGraph ниже. Выбор
+   другого объекта или снятие выделения закрывает её сами собой через
+   тот же путь, что обновляет панель выделения (selectMany→refreshSelBar). */
 function updatePhysicsPanel(){
   const panel=document.getElementById('physicsPanel');
-  const on=S.tool==='physics'&&!!S.physicsKind&&!!S.boardId;
+  const editingGraph=S.tool==='select'&&selected&&selected.type==='physics'&&selected.kind==='graph';
+  const placing=S.tool==='physics'&&!!S.physicsKind;
+  const on=(placing||editingGraph)&&!!S.boardId;
   panel.classList.toggle('hidden',!on);
   if(!on)return;
-  const kind=S.physicsKind;
+  const kind=editingGraph?'graph':S.physicsKind;
   const title=kind==='lens'?(PHYSICS_TITLE.lens+' ('+((S.physicsSign||1)>0?'собирающая':'рассеивающая')+')')
                             :(PHYSICS_TITLE[kind]||'Объект');
   document.getElementById('physicsPanelTitle').textContent=title;
@@ -3576,6 +3842,9 @@ function updatePhysicsPanel(){
   document.getElementById('physicsLensRow').classList.toggle('hidden',kind!=='lens');
   document.getElementById('physicsHeaterRow').classList.toggle('hidden',kind!=='heater');
   document.getElementById('physicsBodyRow').classList.toggle('hidden',kind!=='body');
+  document.getElementById('physicsGraphRow').classList.toggle('hidden',kind!=='graph');
+  document.getElementById('physicsPlaceHint').classList.toggle('hidden',kind==='graph');
+  if(kind==='graph'){renderGraphExpressions();return;}
   if(kind==='magnet'){
     const p=S.physicsProps.magnet;
     document.getElementById('physShowField').checked=p.showField;
@@ -3600,7 +3869,10 @@ function updatePhysicsPanel(){
     document.getElementById('physMassVal').textContent=Math.round(p.mass*1000);
   }
 }
-document.getElementById('physicsPanelClose').onclick=()=>setTool('select');
+document.getElementById('physicsPanelClose').onclick=()=>{
+  if(selected&&selected.type==='physics'&&selected.kind==='graph')select(null);
+  else setTool('select');
+};
 document.getElementById('physShowField').onchange=e=>{S.physicsProps.magnet.showField=e.target.checked;};
 document.getElementById('physStrength').oninput=e=>{
   const v=+e.target.value;
@@ -3632,6 +3904,62 @@ document.getElementById('physMass').oninput=e=>{
   const g=+e.target.value;
   S.physicsProps.body.mass=g/1000;
   document.getElementById('physMassVal').textContent=Math.round(g);
+};
+
+/* ── график: список формул ─────────────────────────────────────
+   Настраивать до постановки нечего — правим уже стоящий на доске объект,
+   поэтому «черновик» здесь не S.physicsProps.graph (тот не используется
+   вовсе), а props самого выделенного объекта. */
+function activeGraphItem(){
+  return (S.tool==='select'&&selected&&selected.type==='physics'&&selected.kind==='graph')?selected:null;
+}
+function graphChanged(it){
+  it.bbox=null;
+  net.send({t:'move',id:it.id,props:{...it.props}});
+  drawBoard();
+}
+function renderGraphExpressions(){
+  const it=activeGraphItem();
+  const box=document.getElementById('physicsExprList');
+  box.innerHTML='';
+  if(!it)return;
+  (it.props.expressions||[]).forEach((ex,i)=>{
+    const row=document.createElement('div');
+    row.style.cssText='display:flex;align-items:center;gap:6px;margin-bottom:6px';
+    const dot=document.createElement('span');
+    dot.style.cssText='width:10px;height:10px;border-radius:50%;flex:none;background:'+(ex.color||'#2F6FE0');
+    const input=document.createElement('input');
+    input.type='text';input.value=ex.text||'';input.placeholder='напр. sin(x)*2';
+    input.style.cssText='flex:1;min-width:0;background:var(--panel-2);color:var(--text);'+
+      'border:1px solid var(--edge);border-radius:6px;padding:5px 7px;font-size:12.5px;'+
+      'font-family:ui-monospace,SFMono-Regular,Menlo,monospace';
+    // рамка краснеет, если формулу не удалось разобрать — не перестраиваем
+    // при этом сам список (потерялся бы фокус и место курсора при наборе)
+    const markValidity=()=>{
+      const t=input.value.trim();
+      input.style.borderColor=(t&&!graphCompile(t).ast)?'#E4796F':'var(--edge)';
+    };
+    markValidity();
+    input.oninput=()=>{ex.text=input.value;markValidity();graphChanged(it);};
+    const del=document.createElement('button');
+    del.className='x';del.title='Убрать';del.textContent='×';
+    del.onclick=()=>{
+      it.props.expressions.splice(i,1);
+      renderGraphExpressions();
+      graphChanged(it);
+    };
+    row.append(dot,input,del);
+    box.appendChild(row);
+  });
+}
+document.getElementById('physGraphAdd').onclick=()=>{
+  const it=activeGraphItem();
+  if(!it)return;
+  if(it.props.expressions.length>=8)return hint('Не больше 8 функций на одном графике');
+  const color=GRAPH_COLORS[it.props.expressions.length%GRAPH_COLORS.length];
+  it.props.expressions.push({id:newId(),text:'',color,visible:true});
+  renderGraphExpressions();
+  graphChanged(it);
 };
 
 addEventListener('paste',async e=>{
@@ -3885,6 +4213,10 @@ const EXTRA_TOOLS={
       icon:'<svg viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M15 6l3-1M15 10l3-1M15 14l3-1M15 18l3-1"/></svg>'},
   ]},
   nuclear:{title:'Ядерная и атомная физика',tools:[]},
+  math:{title:'Математика',tools:[
+    {id:'graph',mode:'physics',physicsKind:'graph',title:'График — постройте несколько функций на одной плоскости',
+      icon:'<svg viewBox="0 0 24 24"><path d="M3 12h18M12 3v18"/><path d="M4 17c2-6 4-8 5-8s2 8 4 8 3-10 5-10"/></svg>'},
+  ]},
 };
 function findExtraTool(id){
   for(const key in EXTRA_TOOLS)for(const t of EXTRA_TOOLS[key].tools)if(t.id===id)return t;
