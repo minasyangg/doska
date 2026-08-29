@@ -1120,14 +1120,27 @@ const physicsAngleCache=new Map();          // id → последний пос�
 function magnetPoles(it){
   const cx=it.x+it.w/2,cy=it.y+it.h/2,rot=it.rot||0;
   const half=it.w/2*0.72,dir={x:Math.cos(rot),y:Math.sin(rot)};
-  return { N:{x:cx-dir.x*half,y:cy-dir.y*half}, S:{x:cx+dir.x*half,y:cy+dir.y*half} };
+  return { N:{x:cx-dir.x*half,y:cy-dir.y*half}, S:{x:cx+dir.x*half,y:cy+dir.y*half}, half };
 }
-/** Поле одного полюса в точке (px,py): убывает как 1/r², направлено от
-    полюса наружу (sign=+1 у north, -1 у south) — стандартное школьное
-    приближение поля стержневого магнита двумя точечными полюсами. */
-function poleField(px,py,pole,sign,strength){
+/* Множитель поля одного полюса — подобран так, чтобы зона заметного действия
+   была в несколько длин самого магнита (как у настоящего): вплотную —
+   стрелка «прилипает», в 3-6 длин — уверенно отклоняется, к 10 длинам поле
+   магнита слабее фонового и стрелка возвращается к «северу». Раньше здесь
+   стояла фиксированная константа без привязки к размеру магнита — с ней
+   реакция была заметна только почти вплотную, отсюда жалоба на низкую
+   чувствительность. */
+const FIELD_K=400;
+/** Поле одного полюса в точке (px,py): убывает как 1/r² — Био-Савара-Лапласа
+    здесь нет (тот закон — для тока в проводнике, пригодится для будущего
+    электромагнита/катушки), а у постоянного стержневого магнита с двумя
+    точечными полюсами (модель Гильберта, ей же исторически описывали
+    магниты до модели Ампера с токовыми контурами) поле от каждого полюса —
+    как у точечного заряда: направлено от полюса наружу (sign=+1 у north,
+    -1 у south), убывает как 1/r². half — полудлина магнита, отсюда «сила
+    поля» масштабируется размером самого объекта, а не берётся с потолка. */
+function poleField(px,py,pole,sign,strength,half){
   const dx=px-pole.x,dy=py-pole.y,d2=Math.max(dx*dx+dy*dy,1);
-  const k=sign*strength*60000/d2, d=Math.sqrt(d2);
+  const k=sign*strength*FIELD_K*half*half/d2, d=Math.sqrt(d2);
   return {x:dx/d*k,y:dy/d*k};
 }
 /** Суммарное магнитное поле в мировой точке (px,py) от всех магнитов на
@@ -1140,9 +1153,9 @@ function magnetFieldAt(px,py){
   let fx=0,fy=0;
   for(const it of items){
     if(it.type!=='physics'||it.kind!=='magnet')continue;
-    const {N,S}=magnetPoles(it);
+    const {N,S,half}=magnetPoles(it);
     const strength=(it.props&&it.props.strength)||1;
-    const fN=poleField(px,py,N,1,strength), fS=poleField(px,py,S,-1,strength);
+    const fN=poleField(px,py,N,1,strength,half), fS=poleField(px,py,S,-1,strength,half);
     fx+=fN.x+fS.x; fy+=fN.y+fS.y;
   }
   return {x:fx,y:fy};
