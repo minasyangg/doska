@@ -1028,20 +1028,48 @@ function cleanPhysicsProps(kind, props) {
     const list = Array.isArray(p.expressions) ? p.expressions.slice(0, 8) : [];
     const expressions = list.map(e => ({
       id: (e && typeof e.id === 'string' && e.id) ? e.id.slice(0, 32) : rnd(8),
+      // саму формулу не разбираем и не выполняем — это делает клиент своим
+      // интерпретатором (см. graphParseExpr/graphEval в index.html), не
+      // eval/new Function; здесь только ограничение размера
       text: (e && typeof e.text === 'string') ? e.text.slice(0, 200) : '',
       color: (e && typeof e.color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(e.color)) ? e.color : '#2F6FE0',
       visible: !(e && e.visible === false),
+      fill: !!(e && e.fill === true),
     }));
-    // точки, поставленные вручную (см. "добавить точку" в index.html) — только
-    // координаты, никакой формулы, поэтому валидировать нечего, кроме чисел
+    const exprIds = new Set(expressions.map(e => e.id));
+    // точки, поставленные вручную (см. двойной клик по графику в index.html):
+    // координаты плюс необязательные подпись и привязка к формуле (onExpr) —
+    // саму формулу точка не несёт, только id уже провалидированной выше
     const pts = Array.isArray(p.points) ? p.points.slice(0, 30) : [];
     const points = pts.map(pt => ({
       id: (pt && typeof pt.id === 'string' && pt.id) ? pt.id.slice(0, 32) : rnd(8),
       x: Number.isFinite(+(pt && pt.x)) ? +pt.x : 0,
       y: Number.isFinite(+(pt && pt.y)) ? +pt.y : 0,
+      label: (pt && typeof pt.label === 'string') ? pt.label.slice(0, 6) : '',
+      onExpr: (pt && typeof pt.onExpr === 'string' && exprIds.has(pt.onExpr)) ? pt.onExpr : null,
     }));
+    // слайдеры-параметры: имя — ровно одна буква, не совпадающая с x/y/t
+    // (это зарезервированные переменные графика) и не повторяющаяся у двух
+    // слайдеров сразу — иначе на клиенте было бы неоднозначно, чьё значение
+    // подставлять при вычислении
+    const seenNames = new Set(['x', 'y', 't']);
+    const prs = Array.isArray(p.params) ? p.params.slice(0, 6) : [];
+    const params = [];
+    for (const pr of prs) {
+      const name = (pr && typeof pr.name === 'string') ? pr.name.trim().toLowerCase() : '';
+      if (!/^[a-z]$/.test(name) || seenNames.has(name)) continue;
+      seenNames.add(name);
+      const val = Number.isFinite(+(pr && pr.value)) ? +pr.value : 1;
+      params.push({ id: (pr && typeof pr.id === 'string' && pr.id) ? pr.id.slice(0, 32) : rnd(8),
+                    name, value: Math.max(-10, Math.min(10, val)) });
+    }
     const label = (v, d) => (typeof v === 'string' && v.trim()) ? v.trim().slice(0, 12) : d;
-    return { view, expressions, points, xLabel: label(p.xLabel, 'x'), yLabel: label(p.yLabel, 'y') };
+    const labelSize = Math.max(9, Math.min(22, Number.isFinite(+p.labelSize) ? +p.labelSize : 13));
+    return {
+      view, expressions, points, params, labelSize,
+      xLabel: label(p.xLabel, 'x'), yLabel: label(p.yLabel, 'y'),
+      angleMode: p.angleMode === 'deg' ? 'deg' : 'rad',
+    };
   }
   return {};
 }

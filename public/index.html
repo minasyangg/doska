@@ -541,6 +541,18 @@
   <div id="physicsGraphRow" class="hidden">
     <div id="physicsExprList"></div>
     <button class="mini" id="physGraphAdd" style="background:var(--panel-2);width:100%;margin-top:2px">+ Добавить функцию</button>
+    <!-- настраивать вид/параметры/подписи до постановки нечего — эта часть
+         появляется только когда график уже выделен на доске -->
+    <div id="physicsGraphPostOnly" class="hidden">
+      <div id="physicsParamList" style="margin-top:9px"></div>
+      <button class="mini" id="physGraphAddParam" style="background:var(--panel-2);width:100%;margin-top:2px">+ Добавить параметр</button>
+      <div style="display:flex;gap:6px;margin-top:11px">
+        <button class="mini" id="physGraphReset" title="Сбросить панораму и масштаб вида" style="background:var(--panel-2);flex:1">⌂ Вид</button>
+        <button class="mini" id="physGraphDeg" title="Единицы измерения угла в sin/cos/tan" style="background:var(--panel-2);flex:1">рад</button>
+      </div>
+      <div class="label" style="margin:9px 0 5px">Размер подписей <span id="physLabelSizeVal" style="color:var(--text)">13</span></div>
+      <input type="range" id="physLabelSize" min="9" max="22" step="1" value="13">
+    </div>
   </div>
   <div class="label" id="physicsPlaceHint" style="margin-top:9px;font-size:11.5px">Кликните по доске, чтобы поставить.</div>
 </div>
@@ -1714,6 +1726,7 @@ const GRAPH_FUNCS={
   sqrt:Math.sqrt,abs:Math.abs,exp:Math.exp,
   ln:Math.log,log:Math.log10,
 };
+const GRAPH_TRIG=new Set(['sin','cos','tan']), GRAPH_INV_TRIG=new Set(['asin','acos','atan']);
 const GRAPH_CONSTS={pi:Math.PI,e:Math.E};
 function graphTokenize(src){
   const toks=[];let i=0;
@@ -1735,9 +1748,16 @@ function graphTokenize(src){
 }
 /** Рекурсивный спуск с неявным умножением: "2x", "2(x+1)", "2sin(x)" —
     в цикле parseTerm любой следующий множитель без явного *narrow
-    считается умножением, если с него вообще может начаться выражение. */
-function graphParse(src){
-  const toks=graphTokenize(src.replace(/^\s*y\s*=/i,''));
+    считается умножением, если с него вообще может начаться выражение.
+    Свободный идентификатор (не x/y/t, не константа, не имя функции перед
+    «(») не считается ошибкой на этапе разбора — это может быть параметр
+    со слайдера, определённый только в контексте конкретного графика.
+    Разбор от этого не зависит, поэтому кэш graphAstCache остаётся ключом
+    просто по тексту; какое имя действительно определено, решает
+    graphEval через словарь vars — не найдётся, вернётся NaN, кривая в
+    этой точке просто прервётся, как при делении на ноль. */
+function graphParseExpr(src){
+  const toks=graphTokenize(src);
   let pos=0;
   const peek=()=>toks[pos];
   const startsFactor=t=>!!t&&(t.t==='num'||t.t==='id'||t.t==='(');
@@ -1788,9 +1808,8 @@ function graphParse(src){
         if(!(tk.v in GRAPH_FUNCS))throw new Error('неизвестная функция «'+tk.v+'»');
         return {t:'call',name:tk.v,args};
       }
-      if(tk.v==='x')return {t:'var'};
       if(tk.v in GRAPH_CONSTS)return {t:'num',v:GRAPH_CONSTS[tk.v]};
-      throw new Error('неизвестный символ «'+tk.v+'»');
+      return {t:'var',name:tk.v};
     }
     throw new Error('неожиданный символ');
   }
@@ -1798,29 +1817,111 @@ function graphParse(src){
   if(pos<toks.length)throw new Error('лишние символы в конце');
   return ast;
 }
-function graphEval(node,x){
+/** «y = …» — обычная запись функции; префикс не часть математики, поэтому
+    срезается перед разбором, а не остаётся особым случаем в парсере. */
+function graphParse(src){ return graphParseExpr(src.replace(/^\s*y\s*=/i,'')); }
+/** vars — таблица имён, доступных ПРЯМО СЕЙЧАС (x и/или y и/или t — что
+    актуально для текущего режима — плюс значения всех слайдеров графика).
+    deg — считать ли аргументы/результаты три­гонометрии в градусах. */
+function graphEval(node,vars,deg){
   switch(node.t){
     case 'num':return node.v;
-    case 'var':return x;
-    case '+':return graphEval(node.a,x)+graphEval(node.b,x);
-    case '-':return graphEval(node.a,x)-graphEval(node.b,x);
-    case '*':return graphEval(node.a,x)*graphEval(node.b,x);
-    case '/':return graphEval(node.a,x)/graphEval(node.b,x);
-    case '^':return Math.pow(graphEval(node.a,x),graphEval(node.b,x));
-    case 'neg':return -graphEval(node.a,x);
-    case 'call':return GRAPH_FUNCS[node.name](...node.args.map(a=>graphEval(a,x)));
+    case 'var':return (vars&&node.name in vars)?vars[node.name]:NaN;
+    case '+':return graphEval(node.a,vars,deg)+graphEval(node.b,vars,deg);
+    case '-':return graphEval(node.a,vars,deg)-graphEval(node.b,vars,deg);
+    case '*':return graphEval(node.a,vars,deg)*graphEval(node.b,vars,deg);
+    case '/':return graphEval(node.a,vars,deg)/graphEval(node.b,vars,deg);
+    case '^':return Math.pow(graphEval(node.a,vars,deg),graphEval(node.b,vars,deg));
+    case 'neg':return -graphEval(node.a,vars,deg);
+    case 'call':{
+      const args=node.args.map(a=>graphEval(a,vars,deg));
+      if(deg&&GRAPH_TRIG.has(node.name))return GRAPH_FUNCS[node.name](args[0]*Math.PI/180);
+      const r=GRAPH_FUNCS[node.name](...args);
+      return (deg&&GRAPH_INV_TRIG.has(node.name))?r*180/Math.PI:r;
+    }
     default:return NaN;
   }
 }
-const graphAstCache=new Map();               // текст формулы → {ast,error}, чтобы не парсить на каждый сэмпл
+/** '=' вне скобок — граница между левой и правой частью неявного уравнения
+    («x^2+y^2=25»); «y = …» ловится раньше как обычная функция и сюда не
+    попадает (см. graphClassify). */
+function findTopLevelEquals(s){
+  let depth=0;
+  for(let i=0;i<s.length;i++){
+    const c=s[i];
+    if(c==='(')depth++; else if(c===')')depth--;
+    else if(c==='='&&depth===0)return i;
+  }
+  return -1;
+}
+function splitTopLevelComma(s){
+  let depth=0,start=0;const parts=[];
+  for(let i=0;i<s.length;i++){
+    const c=s[i];
+    if(c==='(')depth++; else if(c===')')depth--;
+    else if(c===','&&depth===0){parts.push(s.slice(start,i));start=i+1;}
+  }
+  parts.push(s.slice(start));
+  return parts;
+}
+/** Три формы записи в одном и том же поле — как в Desmos, без переключателя:
+    "(cos(t), sin(t))"  → параметрическая кривая
+    "x^2 + y^2 = 25"     → неявное уравнение (обе переменные сразу)
+    всё остальное        → обычная функция y = f(x) (префикс "y=" необязателен) */
+function graphClassify(text){
+  const t=text.trim();
+  if(t[0]==='('&&t[t.length-1]===')'&&splitTopLevelComma(t.slice(1,-1)).length===2)return 'parametric';
+  const eq=findTopLevelEquals(t);
+  if(eq>=0&&t.slice(0,eq).trim().toLowerCase()!=='y')return 'implicit';
+  return 'function';
+}
+const graphAstCache=new Map();  // текст формулы → разобранное представление, чтобы не парсить на каждый сэмпл
 function graphCompile(text){
   if(graphAstCache.has(text))return graphAstCache.get(text);
   let result;
-  try{ result={ast:graphParse(text),error:null}; }
-  catch(err){ result={ast:null,error:err.message}; }
+  try{
+    const mode=graphClassify(text);
+    if(mode==='parametric'){
+      const parts=splitTopLevelComma(text.trim().slice(1,-1));
+      if(parts.length!==2)throw new Error('нужно два выражения через запятую: (x(t), y(t))');
+      result={mode,xAst:graphParseExpr(parts[0]),yAst:graphParseExpr(parts[1]),error:null};
+    }else if(mode==='implicit'){
+      const eq=findTopLevelEquals(text);
+      result={mode,lhsAst:graphParseExpr(text.slice(0,eq)),rhsAst:graphParseExpr(text.slice(eq+1)),error:null};
+    }else{
+      result={mode,ast:graphParse(text),error:null};
+    }
+  }catch(err){ result={mode:null,error:err.message}; }
   if(graphAstCache.size>300)graphAstCache.clear();   // защита от утечки, пока кто-то активно печатает
   graphAstCache.set(text,result);
   return result;
+}
+/** Все имена-переменные, встреченные в дереве — нужно только для подсветки
+    опечаток в панели (граф.движку это не требуется: не найдётся в vars —
+    просто NaN). */
+function graphCollectVars(node,into){
+  if(!node)return;
+  if(node.t==='var'){into.add(node.name);return;}
+  if(node.a)graphCollectVars(node.a,into);
+  if(node.b)graphCollectVars(node.b,into);
+  if(node.args)node.args.forEach(a=>graphCollectVars(a,into));
+}
+/** Формула валидна, если она вообще разобралась И каждое использованное
+    имя — это x/y/t (смотря какой режим) или объявленный на этом графике
+    параметр-слайдер. Второе не умеет проверить сам парсер (см. комментарий
+    у graphParseExpr) — там нет графика, к которому можно быть привязанным. */
+function graphExprOk(text,it){
+  if(!text||!text.trim())return true;      // пустая строка — не ошибка, просто ничего не рисуем
+  const c=graphCompile(text);
+  if(!c.mode)return false;
+  // какое имя вообще осмысленно, зависит от режима: параметрической кривой
+  // при вычислении никто не подставит x, обычной функции — t, и т.д.
+  const known=new Set(c.mode==='parametric'?['t']:c.mode==='implicit'?['x','y']:['x']);
+  (it.props.params||[]).forEach(p=>known.add(p.name));
+  const used=new Set();
+  [c.ast,c.xAst,c.yAst,c.lhsAst,c.rhsAst].forEach(a=>graphCollectVars(a,used));
+  for(const name of used)if(!known.has(name))return false;
+  return true;
 }
 /** «Круглый» шаг сетки под текущий масштаб — 1/2/5×10ⁿ, обычный приём для
     осей графиков: интервалы сами не скачут дробными числами при зуме. */
@@ -1850,21 +1951,95 @@ function zoomGraphAt(it,worldPt,factor){
    "после". props насквозь JSON-совместим (это его смысл — едет по сети),
    поэтому клонировать проще всего через JSON. */
 const cloneProps=p=>JSON.parse(JSON.stringify(p));
-/** Экранные (в мировых координатах) места подписей осей X/Y — общая
-    формула для отрисовки и для клика по ним (переименование). Если сама
-    ось сейчас за пределами вида (график далеко панорамирован), подпись не
-    убегает вникуда, а держится у ближайшего края рамки. */
+/** Место подписи осей X/Y — фиксированный уголок рамки, а не «на самой
+    оси»: у неё есть свой непрозрачный флажок (см. drawGraphLegendChip),
+    который иначе всё равно перекрывал бы деления и саму линию оси, стоило
+    панораме подвести ось ближе к подписи. Раньше подпись держалась у
+    ближайшего края видимой оси и из-за этого «наезжала» на неё почти
+    всегда — один и тот же угол проще и однозначнее. */
 function graphAxisLabelPos(it){
-  const view=it.props.view||{cx:0,cy:0,scale:40};
-  const ccx=it.x+it.w/2,ccy=it.y+it.h/2;
-  const ax=ccx+(0-view.cx)*view.scale, ay=ccy-(0-view.cy)*view.scale;
-  const top=it.y+GRAPH_HEADER_H+12,bottom=it.y+it.h-8,left=it.x+8,right=it.x+it.w-14;
-  const xAxisY=Math.min(Math.max(ay,top),bottom);
-  const yAxisX=Math.min(Math.max(ax,left),right);
+  const size=it.props.labelSize||13;
   return {
-    x:{wx:right,wy:xAxisY-10},
-    y:{wx:yAxisX+10,wy:top-4},
+    x:{wx:it.x+it.w-10,wy:it.y+GRAPH_HEADER_H+11+size/2,size,anchor:'right'},
+    y:{wx:it.x+10,wy:it.y+GRAPH_HEADER_H+11+size/2,size,anchor:'left'},
   };
+}
+/** Подпись с непрозрачным флажком-подложкой позади — гарантированно
+    читаема, чем бы график ни закрасил у неё за спиной (сетка, кривая,
+    сама ось). anchor определяет, в какую сторону от wx растёт текст. */
+function drawGraphLegendChip(ctx,wx,wy,text,size,anchor){
+  ctx.font='700 '+size+'px ui-sans-serif,system-ui,sans-serif';
+  const tw=ctx.measureText(text).width, padX=6,padY=3;
+  const bx=anchor==='right'?wx-tw-padX*2:wx;
+  ctx.fillStyle='rgba(252,251,248,.94)';ctx.strokeStyle='rgba(0,0,0,.15)';ctx.lineWidth=1;
+  ctx.beginPath();ctx.roundRect(bx,wy-size/2-padY,tw+padX*2,size+padY*2,5);ctx.fill();ctx.stroke();
+  ctx.fillStyle='#2A2D33';ctx.textAlign='left';ctx.textBaseline='middle';
+  ctx.fillText(text,bx+padX,wy+1);
+}
+/** Следующая свободная буква A-Z — обычная геометрическая нумерация точек;
+    после алфавита (только если поставить их совсем много) — просто номер. */
+function nextPointLabel(points){
+  const used=new Set(points.map(p=>p.label).filter(Boolean));
+  for(let i=0;i<26;i++){const c=String.fromCharCode(65+i);if(!used.has(c))return c;}
+  return 'P'+(points.length+1);
+}
+/** Неявное уравнение (lhs = rhs, обе части — функции от x И y сразу) —
+    marching squares по решётке шириной в cell экранных пикселей: значения
+    F=lhs-rhs в узлах решётки посчитаны один раз (узлы общие для соседних
+    клеток), а не по клеткам — тех же чисел вчетверо меньше. Для клетки,
+    где F меняет знак, линейной интерполяцией по рёбрам находим точки
+    F=0 и соединяем их — 2 точки пересечения на клетку рисуются одним
+    отрезком, 4 (седловая клетка) — двумя отрезками крест-накрест: это
+    огрубление классических 16 случаев маршрута, которое не разбирает
+    отдельно, какая из двух диагоналей физически правильнее, но лишней
+    нагрузки не создаёт и на практике не искажает узнаваемую форму кривой
+    (окружности/эллипсы/гиперболы не создают седловых клеток вовсе).
+    Сетка фиксированного размера — счёта тем меньше, чем крупнее cell,
+    и он не зависит от того, сколько точек/итераций «попросил» пользователь
+    (в отличие от обычных функций и параметрик, здесь и просить нечего). */
+function paintImplicitCurve(ctx,baseVars,lhsAst,rhsAst,color,deg,toMx,toMy,bx,by,bw,bh){
+  const cell=8;
+  const nx=Math.max(1,Math.ceil(bw/cell)), ny=Math.max(1,Math.ceil(bh/cell));
+  const grid=new Float64Array((nx+1)*(ny+1));
+  const vars={...baseVars};
+  for(let j=0;j<=ny;j++){
+    vars.y=toMy(by+j*cell);
+    for(let i=0;i<=nx;i++){
+      vars.x=toMx(bx+i*cell);
+      let f;try{f=graphEval(lhsAst,vars,deg)-graphEval(rhsAst,vars,deg);}catch{f=NaN;}
+      grid[j*(nx+1)+i]=f;
+    }
+  }
+  const val=(i,j)=>grid[j*(nx+1)+i];
+  const interp=(v0,v1)=>v0/(v0-v1);
+  ctx.strokeStyle=color;ctx.lineWidth=2;ctx.beginPath();
+  for(let j=0;j<ny;j++)for(let i=0;i<nx;i++){
+    const f00=val(i,j),f10=val(i+1,j),f01=val(i,j+1),f11=val(i+1,j+1);
+    if(![f00,f10,f01,f11].every(Number.isFinite))continue;
+    const x0=bx+i*cell,x1=bx+(i+1)*cell,y0=by+j*cell,y1=by+(j+1)*cell;
+    const pts=[];
+    if((f00<0)!==(f10<0)){const t=interp(f00,f10);pts.push([x0+t*(x1-x0),y0]);}
+    if((f10<0)!==(f11<0)){const t=interp(f10,f11);pts.push([x1,y0+t*(y1-y0)]);}
+    if((f01<0)!==(f11<0)){const t=interp(f01,f11);pts.push([x0+t*(x1-x0),y1]);}
+    if((f00<0)!==(f01<0)){const t=interp(f00,f01);pts.push([x0,y0+t*(y1-y0)]);}
+    if(pts.length===2){ctx.moveTo(pts[0][0],pts[0][1]);ctx.lineTo(pts[1][0],pts[1][1]);}
+    else if(pts.length===4){
+      ctx.moveTo(pts[0][0],pts[0][1]);ctx.lineTo(pts[1][0],pts[1][1]);
+      ctx.moveTo(pts[2][0],pts[2][1]);ctx.lineTo(pts[3][0],pts[3][1]);
+    }
+  }
+  ctx.stroke();
+}
+/** y точки — либо хранимое значение, либо (если точка «приклеена» к кривой
+    через onExpr) заново посчитанное из актуальной формулы; общая для
+    отрисовки, подсказки координат при наведении/перетаскивании — так они
+    не могут разойтись между собой. */
+function graphPointY(it,p,baseVars,deg){
+  if(!p.onExpr)return p.y;
+  const host=(it.props.expressions||[]).find(e=>e.id===p.onExpr);
+  const c=host&&graphCompile(host.text);
+  if(!c||c.mode!=='function')return NaN;
+  try{return graphEval(c.ast,{...baseVars,x:p.x},deg);}catch{return NaN;}
 }
 /** Число для подписи деления — обычный toFixed съедает память лишними
     нулями (1.00 вместо 1), а обрезка вручную не путается с 1e-9 от
@@ -1887,19 +2062,26 @@ function paintGraphCoordHint(ctx){
     it=dragging.it;
     const p=it.props.points&&it.props.points[dragging.index];
     if(!p)return;
-    mx=p.x;my=p.y;highlight=true;
+    const deg=it.props.angleMode==='deg', baseVars={};
+    (it.props.params||[]).forEach(pr=>{baseVars[pr.name]=pr.value;});
+    mx=p.x;my=graphPointY(it,p,baseVars,deg);highlight=true;
+    if(!Number.isFinite(my))return;
   }else if(!dragging&&hoverPt&&S.tool==='select'){
     const w=toWorld(hoverPt.x,hoverPt.y);
     const g=itemAt(w);
     if(!g||g.type!=='physics'||g.kind!=='graph')return;
     if(w.y-g.y<=GRAPH_HEADER_H)return;
     it=g;
+    const deg=g.props.angleMode==='deg', baseVars={};
+    (g.props.params||[]).forEach(pr=>{baseVars[pr.name]=pr.value;});
     const view=g.props.view,gcx=g.x+g.w/2,gcy=g.y+g.h/2;
     mx=view.cx+(w.x-gcx)/view.scale;my=view.cy-(w.y-gcy)/view.scale;
     // приклеиваемся к близкой точке — удобнее целиться числом, чем на глаз
     for(const p of (g.props.points||[])){
-      const sx=gcx+(p.x-view.cx)*view.scale,sy=gcy-(p.y-view.cy)*view.scale;
-      if(Math.hypot(w.x-sx,w.y-sy)*S.cam.z<9){mx=p.x;my=p.y;highlight=true;break;}
+      const py=graphPointY(g,p,baseVars,deg);
+      if(!Number.isFinite(py))continue;
+      const sx=gcx+(p.x-view.cx)*view.scale,sy=gcy-(py-view.cy)*view.scale;
+      if(Math.hypot(w.x-sx,w.y-sy)*S.cam.z<9){mx=p.x;my=py;highlight=true;break;}
     }
   }else return;
   const view=it.props.view,gcx=it.x+it.w/2,gcy=it.y+it.h/2;
@@ -1923,6 +2105,9 @@ function paintGraph(ctx,it){
   const ccx=bx+bw/2,ccy=by+bh/2;
   const toSx=mx=>ccx+(mx-view.cx)*view.scale, toSy=my=>ccy-(my-view.cy)*view.scale;
   const toMx=sx=>view.cx+(sx-ccx)/view.scale, toMy=sy=>view.cy-(sy-ccy)/view.scale;
+  const deg=it.props.angleMode==='deg';
+  const baseVars={};(it.props.params||[]).forEach(p=>{baseVars[p.name]=p.value;});
+  const labelSize=it.props.labelSize||13, tickSize=Math.max(8,labelSize-3);
   const ax=toSx(0), ay=toSy(0);
   // где рисовать подписи делений — на самой оси, если она видна, иначе
   // прижимаем к краю рамки (график далеко панорамирован, ось за кадром)
@@ -1933,7 +2118,7 @@ function paintGraph(ctx,it){
   ctx.fillStyle='#FCFBF8';ctx.fillRect(bx,by,bw,bh);
   const stepX=graphNiceStep(80/view.scale), stepY=graphNiceStep(80/view.scale);
   ctx.strokeStyle='rgba(0,0,0,.08)';ctx.lineWidth=1;
-  ctx.font='10px ui-sans-serif,system-ui,sans-serif';ctx.fillStyle='rgba(0,0,0,.45)';
+  ctx.font=tickSize+'px ui-sans-serif,system-ui,sans-serif';ctx.fillStyle='rgba(0,0,0,.45)';
   ctx.textAlign='center';ctx.textBaseline='top';
   for(let mx=Math.ceil(toMx(bx)/stepX)*stepX;mx<=toMx(bx+bw);mx+=stepX){
     const sx=toSx(mx);ctx.beginPath();ctx.moveTo(sx,by);ctx.lineTo(sx,by+bh);ctx.stroke();
@@ -1954,40 +2139,103 @@ function paintGraph(ctx,it){
     ctx.beginPath();ctx.moveTo(bx,ay);ctx.lineTo(bx+bw,ay);ctx.stroke();
     drawArrowhead(ctx,{x:bx+bw-16,y:ay},{x:bx+bw-2,y:ay},1,5,'rgba(0,0,0,.4)');
   }
+  ctx.textAlign='right';ctx.textBaseline='middle';
   ctx.fillText('0',yAxisX-4,xAxisY+3);   // подпись начала координат — единственная общая для обеих осей
   for(const ex of (it.props.expressions||[])){
     if(ex.visible===false||!ex.text||!ex.text.trim())continue;
-    const {ast}=graphCompile(ex.text);
-    if(!ast)continue;
-    ctx.strokeStyle=ex.color||GRAPH_COLORS[0];ctx.lineWidth=2;ctx.lineCap='round';ctx.lineJoin='round';
-    ctx.beginPath();
-    let started=false,prevSy=0;
-    for(let sx=bx;sx<=bx+bw;sx+=1.5){
-      let my;try{my=graphEval(ast,toMx(sx));}catch{my=NaN;}
-      const sy=toSy(my);
-      const ok=Number.isFinite(sy)&&sy>by-bh*3&&sy<by+bh*4;
-      if(ok&&started&&Math.abs(sy-prevSy)<bh*1.5)ctx.lineTo(sx,sy);
-      else if(ok){ctx.moveTo(sx,sy);started=true;}
-      else started=false;
-      if(ok)prevSy=sy;
+    const c=graphCompile(ex.text);
+    if(!c.mode)continue;
+    const color=ex.color||GRAPH_COLORS[0];
+    ctx.strokeStyle=color;ctx.lineWidth=2;ctx.lineCap='round';ctx.lineJoin='round';
+    if(c.mode==='function'){
+      const vars={...baseVars};
+      const samples=[];
+      ctx.beginPath();
+      let started=false,prevSy=0;
+      for(let sx=bx;sx<=bx+bw;sx+=1.5){
+        vars.x=toMx(sx);
+        let my;try{my=graphEval(c.ast,vars,deg);}catch{my=NaN;}
+        const sy=toSy(my);
+        const ok=Number.isFinite(sy)&&sy>by-bh*3&&sy<by+bh*4;
+        if(ok&&started&&Math.abs(sy-prevSy)<bh*1.5)ctx.lineTo(sx,sy);
+        else if(ok){ctx.moveTo(sx,sy);started=true;}
+        else started=false;
+        if(ok)prevSy=sy;
+        samples.push(ok?{sx,sy}:null);
+      }
+      ctx.stroke();
+      if(ex.fill){
+        // заливка — отдельным проходом по тем же отсчётам, разрыв там же,
+        // где рвётся сама линия (домен/асимптота): каждый непрерывный
+        // кусок замыкается через ось X и красится отдельно
+        ctx.save();ctx.globalAlpha=0.16;ctx.fillStyle=color;
+        let i=0;
+        while(i<samples.length){
+          while(i<samples.length&&!samples[i])i++;
+          const start=i;
+          while(i<samples.length&&samples[i])i++;
+          const seg=samples.slice(start,i);
+          if(seg.length>1){
+            ctx.beginPath();ctx.moveTo(seg[0].sx,toSy(0));
+            for(const p of seg)ctx.lineTo(p.sx,p.sy);
+            ctx.lineTo(seg[seg.length-1].sx,toSy(0));
+            ctx.closePath();ctx.fill();
+          }
+        }
+        ctx.restore();
+      }
+    }else if(c.mode==='parametric'){
+      // фиксированный t∈[0,2π] — покрывает один период (окружности,
+      // эллипсы, циклоиды и т.п.); настраиваемый диапазон осознанно не
+      // делаем — то же поле ввода, что и у обычной функции, без второго
+      // ряда настроек под него
+      const vars={...baseVars};
+      const N=400;
+      ctx.beginPath();let started=false,prevSx=0,prevSy=0;
+      for(let i=0;i<=N;i++){
+        vars.t=(i/N)*6.28318530718;
+        let mx,my;
+        try{mx=graphEval(c.xAst,vars,deg);my=graphEval(c.yAst,vars,deg);}catch{mx=NaN;my=NaN;}
+        const sx=toSx(mx),sy=toSy(my);
+        const ok=Number.isFinite(sx)&&Number.isFinite(sy);
+        if(ok&&started&&Math.hypot(sx-prevSx,sy-prevSy)<Math.max(bw,bh)*1.5)ctx.lineTo(sx,sy);
+        else if(ok){ctx.moveTo(sx,sy);started=true;}
+        else started=false;
+        if(ok){prevSx=sx;prevSy=sy;}
+      }
+      ctx.stroke();
+    }else if(c.mode==='implicit'){
+      paintImplicitCurve(ctx,baseVars,c.lhsAst,c.rhsAst,color,deg,toMx,toMy,bx,by,bw,bh);
     }
-    ctx.stroke();
   }
   // точки, поставленные вручную — координаты хранятся в математическом
-  // пространстве графика, поэтому сами едут вместе с видом при панораме/зуме
+  // пространстве графика, поэтому сами едут вместе с видом при панораме/зуме.
+  // Точка, привязанная к кривой (onExpr), своего y не хранит — он всегда
+  // пересчитан из актуальной формулы, поэтому переживает и правку формулы,
+  // и включение/выключение параметра, от которого формула зависит
   for(const p of (it.props.points||[])){
-    const sx=toSx(p.x),sy=toSy(p.y);
-    ctx.fillStyle='#1A1C20';ctx.strokeStyle='#fff';ctx.lineWidth=1.5;
+    const py=graphPointY(it,p,baseVars,deg);
+    if(!Number.isFinite(py))continue;
+    let color='#1A1C20';
+    if(p.onExpr){
+      const host=(it.props.expressions||[]).find(e=>e.id===p.onExpr);
+      if(host)color=host.color||color;
+    }
+    const sx=toSx(p.x),sy=toSy(py);
+    ctx.fillStyle=color;ctx.strokeStyle='#fff';ctx.lineWidth=1.5;
     ctx.beginPath();ctx.arc(sx,sy,4,0,6.2832);ctx.fill();ctx.stroke();
+    if(p.label){
+      ctx.font='700 12px ui-sans-serif,system-ui,sans-serif';ctx.fillStyle='#1A1C20';
+      ctx.textAlign='left';ctx.textBaseline='bottom';
+      ctx.fillText(p.label,sx+6,sy-4);
+    }
   }
   ctx.restore();
   // подписи осей — снаружи клипа не нужны (они внутри рамки), но рисуем уже
-  // после кривых, чтобы не потерялись под линией графика
+  // после кривых и точек, чтобы флажок лежал по-настоящему сверху
   const lbl=graphAxisLabelPos(it);
-  ctx.font='600 12px ui-sans-serif,system-ui,sans-serif';ctx.fillStyle='#4A4E55';
-  ctx.textAlign='center';ctx.textBaseline='middle';
-  ctx.fillText(it.props.xLabel||'x',lbl.x.wx,lbl.x.wy);
-  ctx.fillText(it.props.yLabel||'y',lbl.y.wx,lbl.y.wy);
+  drawGraphLegendChip(ctx,lbl.x.wx,lbl.x.wy,it.props.xLabel||'x',lbl.x.size,lbl.x.anchor);
+  drawGraphLegendChip(ctx,lbl.y.wx,lbl.y.wy,it.props.yLabel||'y',lbl.y.size,lbl.y.anchor);
   ctx.strokeStyle='rgba(0,0,0,.25)';ctx.lineWidth=1.5;ctx.strokeRect(bx,by,bw,bh);
   ctx.fillStyle='rgba(0,0,0,.05)';ctx.fillRect(bx,by,bw,GRAPH_HEADER_H);
   ctx.strokeStyle='rgba(0,0,0,.12)';ctx.lineWidth=1;
@@ -3025,8 +3273,15 @@ function handlesFor(it){
   if(it.type==='physics'&&it.kind==='graph'){
     const view=it.props.view||{cx:0,cy:0,scale:40};
     const gcx=it.x+it.w/2,gcy=it.y+it.h/2;
+    const gdeg=it.props.angleMode==='deg', gvars={};
+    (it.props.params||[]).forEach(pr=>{gvars[pr.name]=pr.value;});
     (it.props.points||[]).forEach((p,i)=>{
-      const wx=gcx+(p.x-view.cx)*view.scale, wy=gcy-(p.y-view.cy)*view.scale;
+      // для точки на кривой — тот же пересчитанный y, что и на отрисовке:
+      // иначе ручка (и хват мышью) отставала бы от видимой точки, стоило
+      // подвинуть точку по x или поправить саму формулу
+      const py=graphPointY(it,p,gvars,gdeg);
+      if(!Number.isFinite(py))return;
+      const wx=gcx+(p.x-view.cx)*view.scale, wy=gcy-(py-view.cy)*view.scale;
       const s=toScreen(wx,wy);
       handles.push({name:'gp'+i,kind:'graphPoint',index:i,sx:s.x,sy:s.y});
     });
@@ -3039,8 +3294,13 @@ function handlesFor(it){
 }
 function handleAt(sp){
   if(!selected)return null;
-  for(const h of handlesFor(selected))
-    if(Math.abs(sp.x-h.sx)<9&&Math.abs(sp.y-h.sy)<9)return h;
+  for(const h of handlesFor(selected)){
+    // подпись оси — не точка, а флажок с текстом переменной длины (имя
+    // можно переименовать хоть в «Скорость»); девяти экранных пикселей
+    // хватает на угол ручки, но не на весь флажок — тут допуск щедрее
+    const tol=h.kind==='axisLabel'?24:9;
+    if(Math.abs(sp.x-h.sx)<tol&&Math.abs(sp.y-h.sy)<tol)return h;
+  }
   return null;
 }
 /** Перенос выделенного — одного объекта или всей группы одним жестом. */
@@ -3316,7 +3576,12 @@ stage.addEventListener('pointermove',e=>{
       // бы неточно на таком масштабе
       const g=dragging.it, view=g.props.view, gcx=g.x+g.w/2, gcy=g.y+g.h/2;
       const p=g.props.points&&g.props.points[dragging.index];
-      if(p){p.x=view.cx+(w.x-gcx)/view.scale; p.y=view.cy-(w.y-gcy)/view.scale;}
+      if(p){
+        p.x=view.cx+(w.x-gcx)/view.scale;
+        // точка на кривой (onExpr) едет только по x — y всегда пересчитан
+        // из формулы при отрисовке, менять его руками нечем и незачем
+        if(!p.onExpr)p.y=view.cy-(w.y-gcy)/view.scale;
+      }
       g.bbox=null;
       drawBoard();refreshSelBar();drawLive();return;
     }
@@ -3630,19 +3895,49 @@ stage.addEventListener('dblclick',e=>{
   if(S.tool==='select'){
     const p=localXY(e), w=toWorld(p.x,p.y), it=itemAt(w);
     if(it&&it.type==='text'&&mineOnly(it)&&!it.locked){e.preventDefault();openTextEditor(null,it);}
-    // двойной щелчок по телу графика (не по уже стоящей там точке/ручке) —
-    // ставит новую точку прямо в это математическое место
-    else if(it&&it.type==='physics'&&it.kind==='graph'&&mineOnly(it)&&!it.locked&&
-            canEdit()&&(w.y-it.y)>GRAPH_HEADER_H&&!(selected===it&&handleAt(p))){
-      const view=it.props.view, gcx=it.x+it.w/2, gcy=it.y+it.h/2;
-      const mx=view.cx+(w.x-gcx)/view.scale, my=view.cy-(w.y-gcy)/view.scale;
-      const before=cloneProps(it.props);
-      (it.props.points=it.props.points||[]).push({id:newId(),x:mx,y:my});
-      it.bbox=null;
-      pushUndo([{type:'move',id:it.id,before:{props:before},after:{props:cloneProps(it.props)}}]);
-      net.send({t:'move',id:it.id,props:{...it.props}});
-      if(!inSelection(it))selectMany(withGroup([it]));
-      drawBoard();
+    else if(it&&it.type==='physics'&&it.kind==='graph'&&mineOnly(it)&&!it.locked&&canEdit()){
+      // двойной клик по уже стоящей точке — переименовать её (то же место,
+      // где для оси открывается переименование по одинарному клику: точку
+      // одинарным нельзя, он уже занят перетаскиванием)
+      const h=(selected===it)?handleAt(p):null;
+      if(h&&h.kind==='graphPoint'){
+        const pt=it.props.points[h.index];
+        const name=prompt('Название точки:',pt.label||'');
+        if(name!==null){
+          const before=cloneProps(it.props);
+          pt.label=name.trim().slice(0,6);
+          pushUndo([{type:'move',id:it.id,before:{props:before},after:{props:cloneProps(it.props)}}]);
+          net.send({t:'move',id:it.id,props:{...it.props}});
+          drawBoard();
+        }
+      }else if(!h&&(w.y-it.y)>GRAPH_HEADER_H){
+        // пусто в теле графика — ставим новую точку; если клик лёг рядом с
+        // самой кривой (в пределах ~10 экранных px), точка приклеивается к
+        // ней (onExpr) и дальше её можно таскать только вдоль кривой
+        const view=it.props.view, gcx=it.x+it.w/2, gcy=it.y+it.h/2;
+        const mx=view.cx+(w.x-gcx)/view.scale, my=view.cy-(w.y-gcy)/view.scale;
+        const deg=it.props.angleMode==='deg';
+        const baseVars={};(it.props.params||[]).forEach(pr=>{baseVars[pr.name]=pr.value;});
+        const tol=10/S.cam.z;
+        let onExpr=null;
+        for(const ex of (it.props.expressions||[])){
+          if(ex.visible===false||!ex.text||!ex.text.trim())continue;
+          const c=graphCompile(ex.text);
+          if(!c||c.mode!=='function')continue;
+          let cy;try{cy=graphEval(c.ast,{...baseVars,x:mx},deg);}catch{cy=NaN;}
+          if(!Number.isFinite(cy))continue;
+          const candSy=gcy-(cy-view.cy)*view.scale;
+          if(Math.abs(candSy-w.y)<tol){onExpr=ex.id;break;}
+        }
+        const before=cloneProps(it.props);
+        const points=it.props.points=it.props.points||[];
+        points.push({id:newId(),x:mx,y:my,label:nextPointLabel(points),onExpr});
+        it.bbox=null;
+        pushUndo([{type:'move',id:it.id,before:{props:before},after:{props:cloneProps(it.props)}}]);
+        net.send({t:'move',id:it.id,props:{...it.props}});
+        if(!inSelection(it))selectMany(withGroup([it]));
+        drawBoard();
+      }
     }
   }
 });
@@ -3982,8 +4277,8 @@ function placePhysics(kind,w){
     :kind==='body'?{material:S.physicsProps.body.material,mass:S.physicsProps.body.mass,
                     energyJoules:0,elapsedSeconds:0,started:false}
     :kind==='graph'?{view:{cx:0,cy:0,scale:40},
-                      expressions:[{id:newId(),text:'',color:GRAPH_COLORS[0],visible:true}],
-                      points:[],xLabel:'x',yLabel:'y'}
+                      expressions:[{id:newId(),text:'',color:GRAPH_COLORS[0],visible:true,fill:false}],
+                      points:[],xLabel:'x',yLabel:'y',angleMode:'rad',params:[],labelSize:13}
     :{};
   const it={id:newId(),by:S.me&&S.me.uid,type:'physics',kind,
             x:w.x-size.w/2,y:w.y-size.h/2,w:size.w,h:size.h,rot:0,locked:false,props};
@@ -4025,7 +4320,18 @@ function updatePhysicsPanel(){
   document.getElementById('physicsBodyRow').classList.toggle('hidden',kind!=='body');
   document.getElementById('physicsGraphRow').classList.toggle('hidden',kind!=='graph');
   document.getElementById('physicsPlaceHint').classList.toggle('hidden',kind==='graph');
-  if(kind==='graph'){renderGraphExpressions();return;}
+  if(kind==='graph'){
+    renderGraphExpressions();
+    document.getElementById('physicsGraphPostOnly').classList.toggle('hidden',!editingGraph);
+    if(editingGraph){
+      renderGraphParams();
+      document.getElementById('physGraphDeg').textContent=selected.props.angleMode==='deg'?'град':'рад';
+      const ls=selected.props.labelSize||13;
+      document.getElementById('physLabelSize').value=ls;
+      document.getElementById('physLabelSizeVal').textContent=ls;
+    }
+    return;
+  }
   if(kind==='magnet'){
     const p=S.physicsProps.magnet;
     document.getElementById('physShowField').checked=p.showField;
@@ -4099,6 +4405,11 @@ function graphChanged(it){
   net.send({t:'move',id:it.id,props:{...it.props}});
   drawBoard();
 }
+/* Три формы в одном текстовом поле (см. graphClassify) — подсказка в
+   placeholder не разъясняет все три: она всего одна строка, а показывать
+   их все за раз загромождало бы каждую строку списка. Кому нужно — тот
+   узнал их из ответа на «что ещё добавить» и подсказки заранее для этого
+   и просил именно так, «как в Desmos». */
 function renderGraphExpressions(){
   const it=activeGraphItem();
   const box=document.getElementById('physicsExprList');
@@ -4110,18 +4421,27 @@ function renderGraphExpressions(){
     const dot=document.createElement('span');
     dot.style.cssText='width:10px;height:10px;border-radius:50%;flex:none;background:'+(ex.color||'#2F6FE0');
     const input=document.createElement('input');
-    input.type='text';input.value=ex.text||'';input.placeholder='напр. sin(x)*2';
+    input.type='text';input.value=ex.text||'';input.placeholder='sin(x)·2 · x²+y²=25 · (cos t,sin t)';
     input.style.cssText='flex:1;min-width:0;background:var(--panel-2);color:var(--text);'+
-      'border:1px solid var(--edge);border-radius:6px;padding:5px 7px;font-size:12.5px;'+
+      'border:1px solid var(--edge);border-radius:6px;padding:5px 7px;font-size:12px;'+
       'font-family:ui-monospace,SFMono-Regular,Menlo,monospace';
-    // рамка краснеет, если формулу не удалось разобрать — не перестраиваем
-    // при этом сам список (потерялся бы фокус и место курсора при наборе)
+    // рамка краснеет, если формулу не удалось разобрать или в ней осталось
+    // неизвестное имя — не перестраиваем при этом сам список (потерялся бы
+    // фокус и место курсора при наборе)
     const markValidity=()=>{
       const t=input.value.trim();
-      input.style.borderColor=(t&&!graphCompile(t).ast)?'#E4796F':'var(--edge)';
+      input.style.borderColor=(t&&!graphExprOk(t,it))?'#E4796F':'var(--edge)';
     };
     markValidity();
     input.oninput=()=>{ex.text=input.value;markValidity();graphChanged(it);};
+    // заливка есть смысл только у обычной функции (для неявных/параметрических
+    // «под кривой» не определено однозначно) — кнопка просто ничего не
+    // включает для них, а не прячется: человек и так поймёт по отсутствию эффекта
+    const fill=document.createElement('button');
+    fill.className='mini ic';fill.title='Заливка под кривой (до оси X)';
+    fill.style.cssText='width:26px;height:26px;flex:none;color:'+(ex.fill?(ex.color||'#2F6FE0'):'var(--muted)');
+    fill.innerHTML='<svg viewBox="0 0 24 24" style="width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.7"><path d="M4 18h16"/><path d="M4 18c3-9 6-11 8-11s3 5 8 5"/></svg>';
+    fill.onclick=()=>{ex.fill=!ex.fill;fill.style.color=ex.fill?(ex.color||'#2F6FE0'):'var(--muted)';graphChanged(it);};
     const del=document.createElement('button');
     del.className='x';del.title='Убрать';del.textContent='×';
     del.onclick=()=>{
@@ -4129,7 +4449,7 @@ function renderGraphExpressions(){
       renderGraphExpressions();
       graphChanged(it);
     };
-    row.append(dot,input,del);
+    row.append(dot,input,fill,del);
     box.appendChild(row);
   });
 }
@@ -4138,8 +4458,83 @@ document.getElementById('physGraphAdd').onclick=()=>{
   if(!it)return;
   if(it.props.expressions.length>=8)return hint('Не больше 8 функций на одном графике');
   const color=GRAPH_COLORS[it.props.expressions.length%GRAPH_COLORS.length];
-  it.props.expressions.push({id:newId(),text:'',color,visible:true});
+  it.props.expressions.push({id:newId(),text:'',color,visible:true,fill:false});
   renderGraphExpressions();
+  graphChanged(it);
+};
+/* Слайдеры-параметры — диапазон намеренно не настраивается (это резко
+   упростило бы панель ценой одной степени свободы, которая на практике
+   нужна редко: подобрать масштаб самим выражением — a*x — не сложнее). */
+const GRAPH_PARAM_RE=/^[a-zа-яё]$/i;
+function renderGraphParams(){
+  const it=activeGraphItem();
+  const box=document.getElementById('physicsParamList');
+  box.innerHTML='';
+  if(!it)return;
+  (it.props.params||[]).forEach((pr,i)=>{
+    const row=document.createElement('div');
+    row.style.cssText='display:flex;align-items:center;gap:6px;margin-bottom:6px';
+    const name=document.createElement('input');
+    name.type='text';name.value=pr.name;name.maxLength=1;
+    name.style.cssText='width:28px;flex:none;text-align:center;background:var(--panel-2);color:var(--text);'+
+      'border:1px solid var(--edge);border-radius:6px;padding:5px 0;font-size:12.5px;'+
+      'font-family:ui-monospace,SFMono-Regular,Menlo,monospace';
+    name.onchange=()=>{
+      const v=name.value.trim().toLowerCase();
+      const taken=(it.props.params||[]).some((p,j)=>j!==i&&p.name===v);
+      if(!GRAPH_PARAM_RE.test(v)||v==='x'||v==='y'||v==='t'||taken){
+        hint('Имя параметра — одна буква, не x/y/t и не занято другим');
+        name.value=pr.name;return;
+      }
+      pr.name=v;renderGraphExpressions();graphChanged(it);
+    };
+    const slider=document.createElement('input');
+    slider.type='range';slider.min=-10;slider.max=10;slider.step=0.1;slider.value=pr.value;
+    slider.style.flex='1';
+    const val=document.createElement('span');
+    val.style.cssText='width:38px;flex:none;text-align:right;font-size:12px;color:var(--text);'+
+      'font-family:ui-monospace,SFMono-Regular,Menlo,monospace';
+    val.textContent=(+pr.value).toFixed(1);
+    slider.oninput=()=>{pr.value=+slider.value;val.textContent=pr.value.toFixed(1);graphChanged(it);};
+    const del=document.createElement('button');
+    del.className='x';del.title='Убрать параметр';del.textContent='×';
+    del.onclick=()=>{it.props.params.splice(i,1);renderGraphParams();renderGraphExpressions();graphChanged(it);};
+    row.append(name,slider,val,del);
+    box.appendChild(row);
+  });
+}
+document.getElementById('physGraphAddParam').onclick=()=>{
+  const it=activeGraphItem();
+  if(!it)return;
+  it.props.params=it.props.params||[];
+  if(it.props.params.length>=6)return hint('Не больше 6 параметров на одном графике');
+  const used=new Set(['x','y','t',...it.props.params.map(p=>p.name)]);
+  const free=[...'abcdknmpqr'].find(c=>!used.has(c))||'k';
+  it.props.params.push({id:newId(),name:free,value:1});
+  renderGraphParams();
+  graphChanged(it);
+};
+document.getElementById('physGraphReset').onclick=()=>{
+  const it=activeGraphItem();
+  if(!it)return;
+  it.props.view={cx:0,cy:0,scale:40};
+  it.bbox=null;
+  graphChanged(it);
+};
+document.getElementById('physGraphDeg').onclick=e=>{
+  const it=activeGraphItem();
+  if(!it)return;
+  it.props.angleMode=it.props.angleMode==='deg'?'rad':'deg';
+  e.currentTarget.textContent=it.props.angleMode==='deg'?'град':'рад';
+  graphChanged(it);
+};
+document.getElementById('physLabelSize').oninput=e=>{
+  const it=activeGraphItem();
+  if(!it)return;
+  const v=+e.target.value;
+  it.props.labelSize=v;
+  document.getElementById('physLabelSizeVal').textContent=v;
+  it.bbox=null;
   graphChanged(it);
 };
 
