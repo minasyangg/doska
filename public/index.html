@@ -5860,7 +5860,7 @@ async function loadBoards(retriesLeft){
       setTimeout(()=>loadBoards(retriesLeft-1),700);
       return;
     }
-    grid.innerHTML='<div class="empty">Не удалось получить список: '+e.message+'</div>';
+    grid.innerHTML='<div class="empty">Не удалось получить список: '+escapeHtml(e.message)+'</div>';
     return;
   }
   S.you=d.you||S.you;renderWho();
@@ -6187,8 +6187,12 @@ async function openSettings(id){
     const free=students.filter(s=>!has.has(s.id));
     // Пусто по двум разным причинам, и человеку важно понимать, по какой:
     // либо всех уже добавили, либо учеников за ним вообще нет.
+    // Имя и класс приходят из profiles в mcko-app и вставляются в разметку —
+    // значит через них в страницу попадает то, чего человек не писал сам.
+    // Экранирование здесь не паранойя, а то же самое, что рядом в loadStats.
     $('#stPick').innerHTML=free.length
-      ? free.map(s=>'<option value="'+s.id+'">'+(s.full_name||s.id)+(s.grade?' · '+s.grade:'')+'</option>').join('')
+      ? free.map(s=>'<option value="'+escapeHtml(s.id)+'">'+
+          escapeHtml(s.full_name||s.id)+(s.grade?' · '+escapeHtml(s.grade):'')+'</option>').join('')
       : '<option value="">'+(students.length?'все ваши ученики уже добавлены'
                                             :'за вами не закреплено ни одного ученика')+'</option>';
     $('#stAdd').disabled=!free.length;
@@ -6452,7 +6456,7 @@ async function route(){
         await api('/guest/enter',{method:'POST',body:{board:id,g,name:S.name,guestId:guestId()}});
       }catch(e){
         showView('dash');
-        grid.innerHTML='<div class="empty">Ссылка недействительна: '+e.message+'</div>';
+        grid.innerHTML='<div class="empty">Ссылка недействительна: '+escapeHtml(e.message)+'</div>';
         window.history.replaceState(null,'','/');
         return;
       }
@@ -6483,7 +6487,7 @@ async function route(){
           return openBoard(id);
         }catch(e){
           showView('dash');
-          grid.innerHTML='<div class="empty">Не удалось войти гостем: '+e.message+'</div>';
+          grid.innerHTML='<div class="empty">Не удалось войти гостем: '+escapeHtml(e.message)+'</div>';
           return;
         }
       }
