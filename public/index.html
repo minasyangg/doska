@@ -1967,7 +1967,10 @@ function graphAxisLabelPos(it){
   const top=it.y+GRAPH_HEADER_H+10,bottom=it.y+it.h-10,left=it.x+10,right=it.x+it.w-10;
   const xAxisY=Math.min(Math.max(ay,top),bottom);
   const yAxisX=Math.min(Math.max(ax,left),right);
-  const size=it.props.labelSize||13;
+  // тот же перевод «сколько на экране» → «сколько в мировых единицах»,
+  // что и в paintGraph (см. uiScale там) — без него подпись росла бы
+  // вместе с зумом доски, как и жаловались на цифры на сетке
+  const size=(it.props.labelSize||13)/(S.cam.z||1);
   return {
     x:{wx:right,wy:xAxisY-size*0.9-4,size,anchor:'right'},   // у правого конца оси X, чуть выше линии
     y:{wx:yAxisX+size*0.5+6,wy:top,size,anchor:'left'},      // у верхнего конца оси Y, чуть правее линии
@@ -1978,7 +1981,7 @@ function graphAxisLabelPos(it){
     сама ось). anchor определяет, в какую сторону от wx растёт текст. */
 function drawGraphLegendChip(ctx,wx,wy,text,size,anchor){
   ctx.font='700 '+size+'px ui-sans-serif,system-ui,sans-serif';
-  const tw=ctx.measureText(text).width, padX=6,padY=3;
+  const tw=ctx.measureText(text).width, padX=size*0.46,padY=size*0.23;
   const bx=anchor==='right'?wx-tw-padX*2:wx;
   // только заливка, без обводки — рамка вокруг подписи выглядела отдельным
   // элементом интерфейса поверх графика; полупрозрачной заливки одной уже
@@ -2128,12 +2131,28 @@ function paintGraph(ctx,it){
   const toMx=sx=>view.cx+(sx-ccx)/view.scale, toMy=sy=>view.cy-(sy-ccy)/view.scale;
   const deg=it.props.angleMode==='deg';
   const baseVars={};(it.props.params||[]).forEach(p=>{baseVars[p.name]=p.value;});
-  const labelSize=it.props.labelSize||13, tickSize=Math.max(8,labelSize-3);
+  // «Размер подписей» в панели — желаемый размер НА ЭКРАНЕ, а рисуем мы в
+  // уже повёрнутых/промасштабированных мировых координатах доски (общий
+  // applyCam применяется до вызова paintItem) — без компенсации на зум
+  // доски (S.cam.z) шрифт/линии этого графика распухали бы при
+  // приближении доски и мельчали при отдалении вместе с самим объектом,
+  // хотя подписи — это не «содержимое» вроде кривой, а служебный текст,
+  // который должен читаться одинаково на любом зуме. uiScale переводит
+  // «сколько нужно на экране» в «сколько написать в мировых единицах»,
+  // чтобы после applyCam на экране получилось ровно столько же.
+  // зажато с обеих сторон — на экстремальном зуме доски (сильно
+  // отдалённой или наоборот) иначе поплыли бы отступы под подписи,
+  // посчитанные от tickSize/labelSize
+  const uiScale=Math.min(4,Math.max(0.15,1/(S.cam.z||1)));
+  const labelSize=(it.props.labelSize||13)*uiScale, tickSize=Math.max(8,(it.props.labelSize||13)-3)*uiScale;
   const ax=toSx(0), ay=toSy(0);
   // где рисовать подписи делений — на самой оси, если она видна, иначе
-  // прижимаем к краю рамки (график далеко панорамирован, ось за кадром)
-  const xAxisY=Math.min(Math.max(ay,by+GRAPH_HEADER_H+12),by+bh-8);
-  const yAxisX=Math.min(Math.max(ax,bx+8),bx+bw-14);
+  // прижимаем к краю рамки (график далеко панорамирован, ось за кадром).
+  // Отступы от края — не про саму линию, а про то, чтобы под подпись-число
+  // рядом с ней оставалось место: раньше 8px не хватало даже на одну
+  // строку цифр, и у прижатой к краю оси числа обрезались рамкой клипа.
+  const xAxisY=Math.min(Math.max(ay,by+GRAPH_HEADER_H+14),by+bh-(tickSize+12));
+  const yAxisX=Math.min(Math.max(ax,bx+34),bx+bw-14);
   ctx.save();
   ctx.beginPath();ctx.rect(bx,by,bw,bh);ctx.clip();
   ctx.fillStyle='#FCFBF8';ctx.fillRect(bx,by,bw,bh);
@@ -2143,7 +2162,7 @@ function paintGraph(ctx,it){
   // в мировых единицах, а на экране только росла вместе с доской
   const pxPerUnit=view.scale*(S.cam.z||1);
   const stepX=graphNiceStep(80/pxPerUnit), stepY=graphNiceStep(80/pxPerUnit);
-  ctx.strokeStyle='rgba(0,0,0,.08)';ctx.lineWidth=1;
+  ctx.strokeStyle='rgba(0,0,0,.08)';ctx.lineWidth=uiScale;
   ctx.font=tickSize+'px ui-sans-serif,system-ui,sans-serif';ctx.fillStyle='rgba(0,0,0,.45)';
   ctx.textAlign='center';ctx.textBaseline='top';
   for(let mx=Math.ceil(toMx(bx)/stepX)*stepX;mx<=toMx(bx+bw);mx+=stepX){
@@ -2161,14 +2180,19 @@ function paintGraph(ctx,it){
   // краю (yAxisX/xAxisY — те же клампы, что и у подписей делений); когда
   // истинная ось вне рамки, это уже не «ровно ноль тут», а лишь ориентир
   // с краю — поэтому в этом случае рисуется пунктиром, а не сплошной.
-  const yAxisPinned=ax<bx+8||ax>bx+bw-14, xAxisPinned=ay<by+GRAPH_HEADER_H+12||ay>by+bh-8;
-  ctx.strokeStyle='rgba(0,0,0,.4)';ctx.fillStyle='rgba(0,0,0,.4)';ctx.lineWidth=1.4;
-  ctx.setLineDash(yAxisPinned?[5,4]:[]);
+  const yAxisPinned=ax<bx+34||ax>bx+bw-14, xAxisPinned=ay<by+GRAPH_HEADER_H+14||ay>by+bh-(tickSize+12);
+  // сами стрелки — компактнее и темнее (были крупнее и той же бледности,
+  // что и линия оси, из-за чего выглядели грубовато); упираются в истинную
+  // границу рамки, а не в нижний край шапки — вертикальная ось теперь
+  // доходит до верха ровно так же, как горизонтальная доходит до правого края
+  const AXIS_ARROW='rgba(0,0,0,.7)', arrowLen=11*uiScale, arrowSize=3.5*uiScale;
+  ctx.strokeStyle='rgba(0,0,0,.4)';ctx.fillStyle='rgba(0,0,0,.4)';ctx.lineWidth=1.4*uiScale;
+  ctx.setLineDash(yAxisPinned?[5*uiScale,4*uiScale]:[]);
   ctx.beginPath();ctx.moveTo(yAxisX,by);ctx.lineTo(yAxisX,by+bh);ctx.stroke();
-  if(!yAxisPinned)drawArrowhead(ctx,{x:yAxisX,y:by+GRAPH_HEADER_H+16},{x:yAxisX,y:by+GRAPH_HEADER_H+2},1,5,'rgba(0,0,0,.4)');
-  ctx.setLineDash(xAxisPinned?[5,4]:[]);
+  if(!yAxisPinned)drawArrowhead(ctx,{x:yAxisX,y:by+arrowLen},{x:yAxisX,y:by+1},1,arrowSize,AXIS_ARROW);
+  ctx.setLineDash(xAxisPinned?[5*uiScale,4*uiScale]:[]);
   ctx.beginPath();ctx.moveTo(bx,xAxisY);ctx.lineTo(bx+bw,xAxisY);ctx.stroke();
-  if(!xAxisPinned)drawArrowhead(ctx,{x:bx+bw-16,y:xAxisY},{x:bx+bw-2,y:xAxisY},1,5,'rgba(0,0,0,.4)');
+  if(!xAxisPinned)drawArrowhead(ctx,{x:bx+bw-arrowLen,y:xAxisY},{x:bx+bw-1,y:xAxisY},1,arrowSize,AXIS_ARROW);
   ctx.setLineDash([]);
   ctx.textAlign='right';ctx.textBaseline='middle';
   ctx.fillText('0',yAxisX-4,xAxisY+3);   // подпись начала координат — единственная общая для обеих осей
@@ -2253,12 +2277,12 @@ function paintGraph(ctx,it){
       if(host)color=host.color||color;
     }
     const sx=toSx(p.x),sy=toSy(py);
-    ctx.fillStyle=color;ctx.strokeStyle='#fff';ctx.lineWidth=1.5;
-    ctx.beginPath();ctx.arc(sx,sy,4,0,6.2832);ctx.fill();ctx.stroke();
+    ctx.fillStyle=color;ctx.strokeStyle='#fff';ctx.lineWidth=1.5*uiScale;
+    ctx.beginPath();ctx.arc(sx,sy,4*uiScale,0,6.2832);ctx.fill();ctx.stroke();
     if(p.label){
-      ctx.font='700 12px ui-sans-serif,system-ui,sans-serif';ctx.fillStyle='#1A1C20';
+      ctx.font='700 '+(12*uiScale)+'px ui-sans-serif,system-ui,sans-serif';ctx.fillStyle='#1A1C20';
       ctx.textAlign='left';ctx.textBaseline='bottom';
-      ctx.fillText(p.label,sx+6,sy-4);
+      ctx.fillText(p.label,sx+6*uiScale,sy-4*uiScale);
     }
   }
   ctx.restore();
@@ -2271,7 +2295,7 @@ function paintGraph(ctx,it){
   // серой лентой — это чисто логическая зона для переноса рамки графика
   // (см. пункт про то, что двигает рамку, а что панорамирует вид), рисовать
   // её отдельным элементом не обязательно
-  ctx.strokeStyle='rgba(0,0,0,.25)';ctx.lineWidth=1.5;ctx.strokeRect(bx,by,bw,bh);
+  ctx.strokeStyle='rgba(0,0,0,.25)';ctx.lineWidth=1.5*uiScale;ctx.strokeRect(bx,by,bw,bh);
 }
 
 function paintPhysics(ctx,it){
