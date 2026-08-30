@@ -6,7 +6,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --env-file=.env.dev.local server.js"
+    "dev": "node --env-file=.env.dev.local server.js",
+    "check": "node --check server.js && node scripts/check-client.js"
   },
   "engines": {
     "node": ">=20.6"
