@@ -1951,17 +1951,26 @@ function zoomGraphAt(it,worldPt,factor){
    "после". props насквозь JSON-совместим (это его смысл — едет по сети),
    поэтому клонировать проще всего через JSON. */
 const cloneProps=p=>JSON.parse(JSON.stringify(p));
-/** Место подписи осей X/Y — фиксированный уголок рамки, а не «на самой
-    оси»: у неё есть свой непрозрачный флажок (см. drawGraphLegendChip),
-    который иначе всё равно перекрывал бы деления и саму линию оси, стоило
-    панораме подвести ось ближе к подписи. Раньше подпись держалась у
-    ближайшего края видимой оси и из-за этого «наезжала» на неё почти
-    всегда — один и тот же угол проще и однозначнее. */
+/** Место подписи осей X/Y — у конца соответствующей оси (там же, где её
+    стрелка), а не в стороне от неё: раньше уводил их в фиксированный
+    уголок рамки, чтобы не наезжали на линию, но так они переставали быть
+    подписями именно ЭТОЙ оси — оторвались от неё. От наезда защищает не
+    расстояние, а собственный непрозрачный флажок (drawGraphLegendChip),
+    поэтому можно держать подпись рядом с осью и одновременно не давать ей
+    сливаться с линией/сеткой. Если ось сейчас вне видимой области
+    (график далеко панорамирован) — подпись не убегает вникуда, а держится
+    у ближайшего края рамки, как и раньше. */
 function graphAxisLabelPos(it){
+  const view=it.props.view||{cx:0,cy:0,scale:40};
+  const ccx=it.x+it.w/2,ccy=it.y+it.h/2;
+  const ax=ccx+(0-view.cx)*view.scale, ay=ccy-(0-view.cy)*view.scale;
+  const top=it.y+GRAPH_HEADER_H+10,bottom=it.y+it.h-10,left=it.x+10,right=it.x+it.w-10;
+  const xAxisY=Math.min(Math.max(ay,top),bottom);
+  const yAxisX=Math.min(Math.max(ax,left),right);
   const size=it.props.labelSize||13;
   return {
-    x:{wx:it.x+it.w-10,wy:it.y+GRAPH_HEADER_H+11+size/2,size,anchor:'right'},
-    y:{wx:it.x+10,wy:it.y+GRAPH_HEADER_H+11+size/2,size,anchor:'left'},
+    x:{wx:right,wy:xAxisY-size*0.9-4,size,anchor:'right'},   // у правого конца оси X, чуть выше линии
+    y:{wx:yAxisX+size*0.5+6,wy:top,size,anchor:'left'},      // у верхнего конца оси Y, чуть правее линии
   };
 }
 /** Подпись с непрозрачным флажком-подложкой позади — гарантированно
@@ -2041,13 +2050,18 @@ function graphPointY(it,p,baseVars,deg){
   if(!c||c.mode!=='function')return NaN;
   try{return graphEval(c.ast,{...baseVars,x:p.x},deg);}catch{return NaN;}
 }
-/** Число для подписи деления — обычный toFixed съедает память лишними
-    нулями (1.00 вместо 1), а обрезка вручную не путается с 1e-9 от
-    накопленной погрешности плавающей точки. */
-function graphFmtNum(v){
-  const r=Math.round(v*100)/100;
+/** Число для подписи деления. Точность считается от шага сетки (step), а
+    не зафиксирована в 2 знаках: на глубоком зуме шаг может стать 0.01 или
+    мельче (сетка ниже теперь адаптивна и к зуму доски, не только к
+    масштабу графика) — с фиксированными двумя знаками соседние деления
+    округлялись бы в одно и то же число и подпись переставала быть
+    отличимой. Один запасной знак сверх «необходимого по шагу» — чтобы не
+    зависеть от пограничного округления самого шага. */
+function graphFmtNum(v,step){
+  const decimals=step>0?Math.max(0,Math.min(8,Math.ceil(-Math.log10(step))+1)):2;
+  const r=+v.toFixed(decimals);
   if(Number.isInteger(r))return String(r);
-  return String(r.toFixed(2)).replace(/0+$/,'').replace(/\.$/,'');
+  return String(r.toFixed(decimals)).replace(/0+$/,'').replace(/\.$/,'');
 }
 /** Координаты под курсором внутри графика — при наведении, либо пока
     тащат точку (тогда — её точное положение, а не позиция курсора: хват
@@ -2089,7 +2103,11 @@ function paintGraphCoordHint(ctx){
   const sp=toScreen(wx,wy);
   ctx.fillStyle=highlight?'#2F6FE0':'#1A1C20';
   ctx.beginPath();ctx.arc(sp.x,sp.y,highlight?5:3,0,6.2832);ctx.fill();
-  const txt='('+graphFmtNum(mx)+', '+graphFmtNum(my)+')';
+  // та же точность, что и у чисел на сетке при таком же зуме — иначе
+  // подсказка могла бы показать меньше знаков, чем нужно, чтобы отличить
+  // соседние деления
+  const coordStep=graphNiceStep(80/(view.scale*(S.cam.z||1)));
+  const txt='('+graphFmtNum(mx,coordStep)+', '+graphFmtNum(my,coordStep)+')';
   ctx.font='11px ui-monospace,SFMono-Regular,Menlo,monospace';
   const tw=ctx.measureText(txt).width+10;
   const bx=Math.min(sp.x+10,innerWidth-tw-8),by=Math.max(8,sp.y-26);
@@ -2116,18 +2134,23 @@ function paintGraph(ctx,it){
   ctx.save();
   ctx.beginPath();ctx.rect(bx,by,bw,bh);ctx.clip();
   ctx.fillStyle='#FCFBF8';ctx.fillRect(bx,by,bw,bh);
-  const stepX=graphNiceStep(80/view.scale), stepY=graphNiceStep(80/view.scale);
+  // цель — «прибл. 80 экранных px между линиями», а не мировых: чистый
+  // view.scale не видит зум самой доски (S.cam.z), поэтому раньше клетка
+  // переставала мельчать при увеличении доски колесом — оставалась той же
+  // в мировых единицах, а на экране только росла вместе с доской
+  const pxPerUnit=view.scale*(S.cam.z||1);
+  const stepX=graphNiceStep(80/pxPerUnit), stepY=graphNiceStep(80/pxPerUnit);
   ctx.strokeStyle='rgba(0,0,0,.08)';ctx.lineWidth=1;
   ctx.font=tickSize+'px ui-sans-serif,system-ui,sans-serif';ctx.fillStyle='rgba(0,0,0,.45)';
   ctx.textAlign='center';ctx.textBaseline='top';
   for(let mx=Math.ceil(toMx(bx)/stepX)*stepX;mx<=toMx(bx+bw);mx+=stepX){
     const sx=toSx(mx);ctx.beginPath();ctx.moveTo(sx,by);ctx.lineTo(sx,by+bh);ctx.stroke();
-    if(Math.abs(mx)>stepX*0.01)ctx.fillText(graphFmtNum(mx),sx,xAxisY+3);   // «0» подписывает вертикальная сетка
+    if(Math.abs(mx)>stepX*0.01)ctx.fillText(graphFmtNum(mx,stepX),sx,xAxisY+3);   // «0» подписывает вертикальная сетка
   }
   ctx.textAlign='right';ctx.textBaseline='middle';
   for(let my=Math.ceil(toMy(by+bh)/stepY)*stepY;my<=toMy(by);my+=stepY){
     const sy=toSy(my);ctx.beginPath();ctx.moveTo(bx,sy);ctx.lineTo(bx+bw,sy);ctx.stroke();
-    if(Math.abs(my)>stepY*0.01)ctx.fillText(graphFmtNum(my),yAxisX-4,sy);
+    if(Math.abs(my)>stepY*0.01)ctx.fillText(graphFmtNum(my,stepY),yAxisX-4,sy);
   }
   // оси со стрелками — «единичный отрезок» виден по подписанным делениям выше
   ctx.strokeStyle='rgba(0,0,0,.4)';ctx.fillStyle='rgba(0,0,0,.4)';ctx.lineWidth=1.4;
