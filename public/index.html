@@ -1980,8 +1980,11 @@ function drawGraphLegendChip(ctx,wx,wy,text,size,anchor){
   ctx.font='700 '+size+'px ui-sans-serif,system-ui,sans-serif';
   const tw=ctx.measureText(text).width, padX=6,padY=3;
   const bx=anchor==='right'?wx-tw-padX*2:wx;
-  ctx.fillStyle='rgba(252,251,248,.94)';ctx.strokeStyle='rgba(0,0,0,.15)';ctx.lineWidth=1;
-  ctx.beginPath();ctx.roundRect(bx,wy-size/2-padY,tw+padX*2,size+padY*2,5);ctx.fill();ctx.stroke();
+  // только заливка, без обводки — рамка вокруг подписи выглядела отдельным
+  // элементом интерфейса поверх графика; полупрозрачной заливки одной уже
+  // достаточно, чтобы текст не сливался с сеткой/кривой позади
+  ctx.fillStyle='rgba(252,251,248,.9)';
+  ctx.beginPath();ctx.roundRect(bx,wy-size/2-padY,tw+padX*2,size+padY*2,5);ctx.fill();
   ctx.fillStyle='#2A2D33';ctx.textAlign='left';ctx.textBaseline='middle';
   ctx.fillText(text,bx+padX,wy+1);
 }
@@ -2152,16 +2155,21 @@ function paintGraph(ctx,it){
     const sy=toSy(my);ctx.beginPath();ctx.moveTo(bx,sy);ctx.lineTo(bx+bw,sy);ctx.stroke();
     if(Math.abs(my)>stepY*0.01)ctx.fillText(graphFmtNum(my,stepY),yAxisX-4,sy);
   }
-  // оси со стрелками — «единичный отрезок» виден по подписанным делениям выше
+  // Оси рисуются всегда, а не только когда истинный ноль виден: иначе,
+  // стоило отойти панорамой от (0,0), они пропадали бы совсем — не за что
+  // зацепиться взглядом, чтобы понять, куда вообще смотришь. Прижаты к
+  // краю (yAxisX/xAxisY — те же клампы, что и у подписей делений); когда
+  // истинная ось вне рамки, это уже не «ровно ноль тут», а лишь ориентир
+  // с краю — поэтому в этом случае рисуется пунктиром, а не сплошной.
+  const yAxisPinned=ax<bx+8||ax>bx+bw-14, xAxisPinned=ay<by+GRAPH_HEADER_H+12||ay>by+bh-8;
   ctx.strokeStyle='rgba(0,0,0,.4)';ctx.fillStyle='rgba(0,0,0,.4)';ctx.lineWidth=1.4;
-  if(ax>=bx&&ax<=bx+bw){
-    ctx.beginPath();ctx.moveTo(ax,by);ctx.lineTo(ax,by+bh);ctx.stroke();
-    drawArrowhead(ctx,{x:ax,y:by+GRAPH_HEADER_H+16},{x:ax,y:by+GRAPH_HEADER_H+2},1,5,'rgba(0,0,0,.4)');
-  }
-  if(ay>=by&&ay<=by+bh){
-    ctx.beginPath();ctx.moveTo(bx,ay);ctx.lineTo(bx+bw,ay);ctx.stroke();
-    drawArrowhead(ctx,{x:bx+bw-16,y:ay},{x:bx+bw-2,y:ay},1,5,'rgba(0,0,0,.4)');
-  }
+  ctx.setLineDash(yAxisPinned?[5,4]:[]);
+  ctx.beginPath();ctx.moveTo(yAxisX,by);ctx.lineTo(yAxisX,by+bh);ctx.stroke();
+  if(!yAxisPinned)drawArrowhead(ctx,{x:yAxisX,y:by+GRAPH_HEADER_H+16},{x:yAxisX,y:by+GRAPH_HEADER_H+2},1,5,'rgba(0,0,0,.4)');
+  ctx.setLineDash(xAxisPinned?[5,4]:[]);
+  ctx.beginPath();ctx.moveTo(bx,xAxisY);ctx.lineTo(bx+bw,xAxisY);ctx.stroke();
+  if(!xAxisPinned)drawArrowhead(ctx,{x:bx+bw-16,y:xAxisY},{x:bx+bw-2,y:xAxisY},1,5,'rgba(0,0,0,.4)');
+  ctx.setLineDash([]);
   ctx.textAlign='right';ctx.textBaseline='middle';
   ctx.fillText('0',yAxisX-4,xAxisY+3);   // подпись начала координат — единственная общая для обеих осей
   for(const ex of (it.props.expressions||[])){
@@ -2259,10 +2267,11 @@ function paintGraph(ctx,it){
   const lbl=graphAxisLabelPos(it);
   drawGraphLegendChip(ctx,lbl.x.wx,lbl.x.wy,it.props.xLabel||'x',lbl.x.size,lbl.x.anchor);
   drawGraphLegendChip(ctx,lbl.y.wx,lbl.y.wy,it.props.yLabel||'y',lbl.y.size,lbl.y.anchor);
+  // полоска-«шапка» сверху (GRAPH_HEADER_H) больше не закрашивается видимой
+  // серой лентой — это чисто логическая зона для переноса рамки графика
+  // (см. пункт про то, что двигает рамку, а что панорамирует вид), рисовать
+  // её отдельным элементом не обязательно
   ctx.strokeStyle='rgba(0,0,0,.25)';ctx.lineWidth=1.5;ctx.strokeRect(bx,by,bw,bh);
-  ctx.fillStyle='rgba(0,0,0,.05)';ctx.fillRect(bx,by,bw,GRAPH_HEADER_H);
-  ctx.strokeStyle='rgba(0,0,0,.12)';ctx.lineWidth=1;
-  ctx.beginPath();ctx.moveTo(bx,by+GRAPH_HEADER_H);ctx.lineTo(bx+bw,by+GRAPH_HEADER_H);ctx.stroke();
 }
 
 function paintPhysics(ctx,it){
