@@ -123,9 +123,17 @@ function startLoad(c, i) {
   }, STROKE_MS));
 }
 
+/* Таймаут обязателен. Без него скрипт однажды повис навсегда: сервер не
+   отвечал по HTTP, fetch ждал молча, и замер не заканчивался ни успехом, ни
+   ошибкой — со стороны это выглядело как "доска не держит 60 человек", хотя
+   дело было в стенде. Не отвечает — это тоже результат, и его надо показать,
+   а не ждать. */
 const fetchMetrics = async () => {
-  try { return await (await fetch('http://' + HOST + ':' + PORT + '/metrics')).text(); }
-  catch { return ''; }
+  try {
+    const r = await fetch('http://' + HOST + ':' + PORT + '/metrics',
+                          { signal: AbortSignal.timeout(5000) });
+    return await r.text();
+  } catch { return ''; }
 };
 // разбор без регулярок: в имени метрики бывают и кавычки, и фигурные скобки
 const pick = (text, name) => {
@@ -169,6 +177,7 @@ const pick = (text, name) => {
 
   const after = await fetchMetrics();
   for (const c of conns) if (c) { for (const t of c.timers) clearInterval(t); c.ws.close(); }
+  if (!after) console.log('! сервер не ответил на /metrics под нагрузкой — цифры ниже неполные');
 
   const mb = n => (typeof n === 'number' ? (n / 1048576).toFixed(1) : '—');
   const per = n => Math.round(n / dt);
