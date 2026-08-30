@@ -26,6 +26,7 @@
 const path = require('path');
 const fs = require('fs');
 const WebSocket = require('ws');
+const { EOL } = require('os');
 const session = require('../lib/session');
 
 const arg = (name, def) => {
@@ -175,22 +176,30 @@ const pick = (text, name) => {
   const ms = v => (typeof v === 'number' ? (v * 1000).toFixed(1) + ' мс' : v);
   const joins = stat.joinMs.sort((a, b) => a - b);
 
-  console.log('');
-  console.log('──────── итог ────────');
-  console.log('вошли:               ' + stat.joined + ' из ' + CLIENTS +
-              ', медиана ' + (joins[joins.length >> 1] || 0) + ' мс, худший ' + (joins[joins.length - 1] || 0) + ' мс');
-  console.log('боты отправили:      ' + stat.sent + ' (' + per(stat.sent) + '/с)');
-  console.log('боты получили:       ' + stat.recv + ' (' + per(stat.recv) + '/с), ' +
-              mb(stat.recvBytes) + ' МБ (' + mb(stat.recvBytes / dt) + ' МБ/с)');
-  console.log('размножение:         x' + (stat.sent ? (stat.recv / stat.sent).toFixed(1) : 0));
-  console.log('');
-  console.log('задержка цикла p50:  ' + ms(q(after, 'doska_loop_delay_seconds{q="0.5"}')));
-  console.log('задержка цикла p99:  ' + ms(q(after, 'doska_loop_delay_seconds{q="0.99"}')));
-  console.log('задержка цикла max:  ' + ms(q(after, 'doska_loop_delay_seconds{q="max"}')));
-  console.log('память RSS:          ' + mb(q(after, 'doska_memory_bytes{part="rss"}')) + ' МБ' +
-              ' (до нагрузки ' + mb(q(mid, 'doska_memory_bytes{part="rss"}')) + ')');
-  console.log('комнат загружено:    ' + q(after, 'doska_room_loads_total'));
-  console.log('отброшено лимитом:   ' + q(after, 'doska_relay_dropped_total'));
-  console.log('объектов на доске:   ' + q(after, 'doska_items_total'));
-  process.exit(0);
+  /* Собираем отчёт одной строкой и выходим только после того, как он ушёл.
+     process.exit() обрывает незаписанное: в канал (а вывод почти всегда идёт
+     в канал — через grep или в файл) stdout пишется асинхронно, и на 60
+     участниках итог просто пропадал целиком, хотя замер к тому моменту уже
+     состоялся. */
+  const report = [
+    '',
+    '──────── итог ────────',
+    'вошли:               ' + stat.joined + ' из ' + CLIENTS +
+      ', медиана ' + (joins[joins.length >> 1] || 0) + ' мс, худший ' + (joins[joins.length - 1] || 0) + ' мс',
+    'боты отправили:      ' + stat.sent + ' (' + per(stat.sent) + '/с)',
+    'боты получили:       ' + stat.recv + ' (' + per(stat.recv) + '/с), ' +
+      mb(stat.recvBytes) + ' МБ (' + mb(stat.recvBytes / dt) + ' МБ/с)',
+    'размножение:         x' + (stat.sent ? (stat.recv / stat.sent).toFixed(1) : 0),
+    '',
+    'задержка цикла p50:  ' + ms(q(after, 'doska_loop_delay_seconds{q="0.5"}')),
+    'задержка цикла p99:  ' + ms(q(after, 'doska_loop_delay_seconds{q="0.99"}')),
+    'задержка цикла max:  ' + ms(q(after, 'doska_loop_delay_seconds{q="max"}')),
+    'память RSS:          ' + mb(q(after, 'doska_memory_bytes{part="rss"}')) + ' МБ' +
+      ' (до нагрузки ' + mb(q(mid, 'doska_memory_bytes{part="rss"}')) + ')',
+    'комнат загружено:    ' + q(after, 'doska_room_loads_total'),
+    'отброшено лимитом:   ' + q(after, 'doska_relay_dropped_total'),
+    'объектов на доске:   ' + q(after, 'doska_items_total'),
+    '',
+  ].join(EOL) + EOL;
+  process.stdout.write(report, () => process.exit(0));
 })();
