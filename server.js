@@ -75,11 +75,37 @@ function readBody(req, limit) {
    отвечает. */
 const rooms = new Map();
 
-async function loadRoom(id) {
-  let r = rooms.get(id);
-  if (r) return r;
+/* Одна загрузка на доску, даже если её просят разом.
+
+   Между «в карте комнаты нет» и «положили в карту» стоит чтение с диска, а это
+   await: пока оно идёт, в ту же функцию успевают войти обработчики других
+   соединений — тоже не найти комнату и тоже начать загрузку. В карте оставалась
+   последняя созданная, а ws.room у вошедших раньше указывал на осиротевшие
+   копии. Видно это было ровно там, где больно: класс заходит по ссылке
+   одновременно, часть учеников попадает в свою копию комнаты и не видит чужих
+   штрихов, а её собственных не видит никто — при том, что доска у каждого
+   выглядит рабочей.
+
+   Поэтому здесь помнится незавершённое обещание: второй и все следующие
+   получают его же, а не начинают свою загрузку. Тот же приём, что у обмена
+   refresh-токена в lib/session.js. */
+const loadingRooms = new Map();
+
+function loadRoom(id) {
+  const have = rooms.get(id);
+  if (have) return Promise.resolve(have);
+  const already = loadingRooms.get(id);
+  if (already) return already;
+  // set синхронный и попадает в карту раньше любого микротаска, поэтому
+  // .finally не может стереть запись прежде, чем она там появится
+  const p = loadRoomNow(id).finally(() => loadingRooms.delete(id));
+  loadingRooms.set(id, p);
+  return p;
+}
+
+async function loadRoomNow(id) {
   const saved = await store.load(id);
-  r = {
+  const r = {
     id,
     title: saved.title || 'Без названия',
     items: saved.items,
