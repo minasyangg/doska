@@ -858,6 +858,24 @@ server.on('upgrade', async (req, socket, head) => {
   });
 });
 
+/* Метка операции для метрик — только из этого списка.
+
+   Раньше сюда шло само присланное поле t, обрезанное до 12 символов. Тип
+   сообщения приходит от клиента и ничем не проверяется: handleMessage
+   неизвестные молча игнорирует, но счётчик успевал отработать раньше. То есть
+   любой участник доски — хватало обычного ученика с изменённым клиентом — мог
+   слать сообщения со случайным t и наращивать карты счётчиков и гистограмм в
+   lib/metrics.js без всякого потолка. Это и рост памяти процесса, и взрыв
+   кардинальности в Prometheus, который такую метрику потом не переварит.
+
+   Список ровно тот, что разбирает switch ниже; всё прочее считается вместе
+   как other — знать, сколько пришло мусора, полезно, а вот во что именно он
+   был одет, метрике незачем. */
+const OP_NAMES = new Set(['join', 'add', 'move', 'erase', 'restore', 'z',
+                          'cursor', 'live', 'view', 'presence', 'callAll',
+                          'lock', 'clear']);
+const opLabel = t => (typeof t === 'string' && OP_NAMES.has(t)) ? t : 'other';
+
 const send = (ws, o) => { if (ws.readyState === 1) ws.send(JSON.stringify(o)); };
 function broadcast(room, o, except) {
   const s = JSON.stringify(o);
@@ -1241,18 +1259,18 @@ wss.on('connection', (ws, req) => {
 
   ws.on('message', async raw => {
     let m; try { m = JSON.parse(raw); } catch { metrics.inc('doska_bad_messages_total'); return; }
+    const op = opLabel(m.t);
     /* Сколько занял разбор и рассылка одного сообщения. Замер — два вычитания,
        на рисование не влияет, зато лаги видно раньше, чем их заметит учитель.
        Курсоры и живой штрих не меряем: их много, а полезного в их задержке
        ничего — они и так идут мимо всей логики. */
-    const done = (m.t === 'cursor' || m.t === 'live')
-      ? null : metrics.timer('doska_op_seconds', { op: String(m.t || '?').slice(0, 12) });
-    if (done) queueMicrotask(() => {});      // порядок замера не меняем
+    const done = (op === 'cursor' || op === 'live')
+      ? null : metrics.timer('doska_op_seconds', { op });
     try {
       await handleMessage(ws, m);
     } finally {
       if (done) done();
-      metrics.inc('doska_messages_total', 1, { op: String(m.t || '?').slice(0, 12) });
+      metrics.inc('doska_messages_total', 1, { op });
     }
   });
 
