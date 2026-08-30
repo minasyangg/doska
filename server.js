@@ -1649,17 +1649,28 @@ setInterval(() => {
 /* Права проверяются заново раз в минуту, а не на каждое сообщение: обработчик
    должен оставаться синхронным, иначе движок начнёт ждать сеть. Владелец убрал
    участника — тот отвалится в течение минуты, а не после конца урока. */
+async function recheckCap(ws) {
+  let cap;
+  try { ({ cap } = await cap_.resolve(ws.session, ws.room.id, { fresh: true })); }
+  catch { return; }                           // сбой связи прав не отнимает
+  if (cap === ws.me.cap) return;
+  ws.me.cap = cap;
+  if (cap === 'none') { send(ws, { t: 'denied' }); ws.close(4003, 'доступ отозван'); return; }
+  send(ws, { t: 'cap', cap });
+  broadcast(ws.room, { t: 'peer', peer: peerInfo(ws) }, ws);
+}
+
+/* Пачками, а не по одному. Раньше здесь стоял обычный for с await внутри: на
+   сотне участников это две сотни обращений к Supabase строго друг за другом,
+   и обход растягивался на секунды. Залпом все сразу — тоже нельзя, упрёмся в
+   его лимиты. Восемь за раз держат обход в пределах секунды и не создают
+   всплеска; одинаковые запросы (две вкладки одного человека) вдобавок
+   склеиваются в lib/capability.js. */
+const CAP_BATCH = 8;
 setInterval(async () => {
-  for (const ws of wss.clients) {
-    if (!ws.room || !ws.session) continue;
-    let cap;
-    try { ({ cap } = await cap_.resolve(ws.session, ws.room.id, { fresh: true })); }
-    catch { continue; }                       // сбой связи прав не отнимает
-    if (cap === ws.me.cap) continue;
-    ws.me.cap = cap;
-    if (cap === 'none') { send(ws, { t: 'denied' }); ws.close(4003, 'доступ отозван'); continue; }
-    send(ws, { t: 'cap', cap });
-    broadcast(ws.room, { t: 'peer', peer: peerInfo(ws) }, ws);
+  const list = [...wss.clients].filter(ws => ws.room && ws.session);
+  for (let i = 0; i < list.length; i += CAP_BATCH) {
+    await Promise.all(list.slice(i, i + CAP_BATCH).map(ws => recheckCap(ws)));
   }
 }, 60000);
 
