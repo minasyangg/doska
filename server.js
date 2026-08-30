@@ -769,33 +769,70 @@ const server = http.createServer(async (req, res) => {
   }
 
   /* --- статика --- */
-  const rel = decodeURIComponent(p === '/' ? '/index.html' : p);
+  let rel;
+  // «/%» и прочая порча в адресе роняли decodeURIComponent, а он стоял вне
+  // try/catch: обработчик асинхронный, значит запрос просто повисал без ответа
+  try { rel = decodeURIComponent(p === '/' ? '/index.html' : p); }
+  catch { res.writeHead(400); return res.end(); }
   const file = path.join(PUBLIC, path.normalize(rel).replace(/^([\\/])+/, ''));
   if (!file.startsWith(PUBLIC)) { res.writeHead(403); return res.end(); }
-  fs.readFile(file, (err, buf) => {
-    if (err) return fs.readFile(path.join(PUBLIC, 'index.html'), (e2, b2) => {
-      if (e2) { res.writeHead(404); return res.end('not found'); }
-      sendStatic(req, res, b2, '.html');
-    });
-    sendStatic(req, res, buf, path.extname(file));
-  });
+
+  let rec = await loadStatic(file).catch(() => null);
+  let ext = path.extname(file);
+  // нет такого файла — отдаём страницу, дальше маршрутизирует сам клиент
+  if (!rec) { rec = await loadStatic(path.join(PUBLIC, 'index.html')).catch(() => null); ext = '.html'; }
+  if (!rec) { res.writeHead(404); return res.end('not found'); }
+  return sendStatic(req, res, rec, ext);
 });
 
-/* Отдача статики со сжатием.
+/* Отдача статики: кэш файла, сжатие и метка версии.
 
-   Клиент доски — один файл на 165 КБ, и он уходил целиком на каждую загрузку.
-   Для ученика с телефона это несколько секунд ожидания на ровном месте; brotli
-   ужимает его примерно в пять раз.
+   Клиент доски — один файл, и он уходил целиком на каждую загрузку. Для
+   ученика с телефона это секунды ожидания на ровном месте; brotli ужимает его
+   примерно в пять раз.
 
-   Сжатое держим в памяти: файлов немного, они меняются только при выкладке, а
-   так каждый запрос обходится без работы процессора. Ключ кэша — размер и
-   время правки файла: подменился файл — пересжали. */
+   Но сжатия мало. Заголовок cache-control: no-cache велит браузеру
+   перепроверять файл — а перепроверять было НЕЧЕМ: ни ETag, ни Last-Modified
+   не отдавалось, значит условный запрос невозможен и каждое открытие страницы
+   тянуло её целиком заново. На старте урока это сотня полных загрузок вместо
+   сотни ответов «304» по сотне байт. Теперь есть ETag из размера и времени
+   правки: выложили новую версию — метка сменилась сама.
+
+   Держим в памяти и сырой файл тоже, не только сжатый: раньше сжатое
+   кэшировалось, а исходное читалось с диска на каждый запрос.
+
+   Ключом кэша сжатия был «способ:расширение:длина» — без имени файла. Пока
+   файл один, это сходило с рук; два разных .js одинаковой длины уже отдавались
+   бы вперемешку. Теперь кэш живёт при самой записи о файле, и ключ ему не
+   нужен вовсе. */
 const COMPRESSIBLE = new Set(['.html', '.js', '.css', '.json', '.svg']);
-const zipCache = new Map();
+const fileCache = new Map();          // путь → { mtimeMs, size, raw, etag, zip }
 
-function sendStatic(req, res, buf, ext) {
+async function loadStatic(file) {
+  const st = await fsp.stat(file);
+  if (!st.isFile()) throw new Error('не файл');
+  const hit = fileCache.get(file);
+  if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit;
+  const rec = {
+    mtimeMs: st.mtimeMs, size: st.size,
+    raw: await fsp.readFile(file),
+    etag: '"' + st.size.toString(36) + '-' + Math.round(st.mtimeMs).toString(36) + '"',
+    zip: new Map(),
+  };
+  fileCache.set(file, rec);
+  return rec;
+}
+
+function sendStatic(req, res, rec, ext) {
   const type = MIME[ext] || 'application/octet-stream';
-  const head = { 'content-type': type, 'cache-control': 'no-cache', vary: 'accept-encoding' };
+  const head = { 'content-type': type, 'cache-control': 'no-cache',
+                 vary: 'accept-encoding', etag: rec.etag };
+  // ровно то же самое уже лежит в браузере — не шлём тело
+  if (req.headers['if-none-match'] === rec.etag) {
+    res.writeHead(304, { 'cache-control': 'no-cache', vary: 'accept-encoding', etag: rec.etag });
+    return res.end();
+  }
+  const buf = rec.raw;
   const accept = String(req.headers['accept-encoding'] || '');
   // мелочь сжимать дороже, чем отдать как есть
   if (!COMPRESSIBLE.has(ext) || buf.length < 1024) {
@@ -805,15 +842,14 @@ function sendStatic(req, res, buf, ext) {
   const how = /\bbr\b/.test(accept) ? 'br' : /\bgzip\b/.test(accept) ? 'gzip' : null;
   if (!how) { res.writeHead(200, head); return res.end(buf); }
 
-  const key = how + ':' + ext + ':' + buf.length;
-  const hit = zipCache.get(key);
+  const hit = rec.zip.get(how);
   if (hit) {
     res.writeHead(200, { ...head, 'content-encoding': how });
     return res.end(hit);
   }
   const done = (e, out) => {
     if (e) { res.writeHead(200, head); return res.end(buf); }
-    zipCache.set(key, out);
+    rec.zip.set(how, out);
     res.writeHead(200, { ...head, 'content-encoding': how });
     res.end(out);
   };
