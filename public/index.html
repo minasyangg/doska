@@ -3066,13 +3066,16 @@ const net={
       // вкладки продолжают работать, пока их не перезагрузят
       case 'presence':peerViews.set(m.id,{cam:m.cam,w:m.w,h:m.h,seen:performance.now()});drawLive();break;
       case 'title':setTitle(m.title);break;
-      case 'live':{
-        let s=remoteLive.get(m.sid);
-        if(!s){s=mkStroke(m.kind,m.color,m.size,m.sid,m.by);remoteLive.set(m.sid,s);}
-        s.type=m.kind;s.color=m.color;s.size=m.size;s.seen=performance.now();
-        if((m.from|0)===s.pts.length)for(const a of m.pts)s.pts.push({x:a[0],y:a[1],p:a[2]});
+      // Живые штрихи — тоже пачкой на комнату (см. 'cursors' выше). Пачка
+      // приходит и нам самим: свой штрих уже нарисован как current, второй раз
+      // поверх него не нужен, поэтому по by отсеиваем себя.
+      case 'lives':{
+        const me=S.me&&S.me.id;
+        for(const e of m.list||[]){ if(e.by===me)continue; applyLive(e); }
         drawLive();break;
       }
+      // одиночный — от сервера прежней версии, пока вкладку не перезагрузили
+      case 'live':applyLive(m);drawLive();break;
       case 'add':remoteLive.delete(m.item.id);addItem(inflate(m.item));break;
       case 'bulk':for(const it of m.items)addItem(inflate(it));break;
       case 'erase':for(const id of m.ids){dropFromSelection(id);removeItem(id);}drawBoard();break;
@@ -3213,6 +3216,16 @@ function inflateStroke(raw){
   return s;
 }
 function inflate(raw){return (INFLATE[raw.type]||inflateStroke)(raw);}
+/* Кадр живого штриха соседа. from — сколько точек у него уже было: если не
+   сошлось, кадры разъехались, и дописывать нельзя — иначе линия склеится из
+   кусков в неверном порядке. Тогда просто ждём следующего штриха; готовый
+   объект всё равно приедет отдельным 'add'. */
+function applyLive(m){
+  let s=remoteLive.get(m.sid);
+  if(!s){s=mkStroke(m.kind,m.color,m.size,m.sid,m.by);remoteLive.set(m.sid,s);}
+  s.type=m.kind;s.color=m.color;s.size=m.size;s.seen=performance.now();
+  if((m.from|0)===s.pts.length)for(const a of m.pts)s.pts.push({x:a[0],y:a[1],p:a[2]});
+}
 function addItem(it,quiet){
   if(byId.has(it.id))return;
   it.bbox=bboxOf(it);items.push(it);byId.set(it.id,it);

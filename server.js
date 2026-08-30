@@ -117,7 +117,7 @@ async function loadRoomNow(id) {
        уходят пачкой раз в CURSOR_FLUSH_MS (см. ниже, почему). Карта, а не
        список: за 50 мс один и тот же человек успевает прислать курсор
        дважды, и старое положение никому не нужно — важно последнее. */
-    curs: new Map(), pres: new Map(),
+    curs: new Map(), pres: new Map(), live: new Map(),
     /* Указатель «идентификатор → объект».
 
        Без него каждое действие искало объект перебором всего содержимого:
@@ -1477,7 +1477,23 @@ wss.on('connection', (ws, req) => {
         if (!mayEdit || !mayRelay(ws)) return;
         const live = cleanLive(m);
         if (!live) return;
-        broadcast(room, { t: 'live', by: ws.me.sid, ...live }, ws);
+        /* Копится так же, как курсоры, но склейкой, а не заменой: у живого
+           штриха есть счётчик from, и получатель дописывает точки, только
+           если from совпал с тем, сколько их у него уже есть. Выбросить
+           промежуточный кадр значило бы разорвать эту цепочку, и остаток
+           штриха у соседей просто не дорисовался бы до конца жеста.
+
+           За 50 мс при шаге клиента в 45 мс иногда приходит два кадра — их и
+           склеиваем в один. Если же from не сошёлся (начался новый штрих или
+           кадры разъехались), кладём как есть: цепочку рассудит получатель. */
+        const key = ws.me.sid + '|' + live.sid;
+        const had = room.live.get(key);
+        if (had && live.from === had.from + had.pts.length) {
+          had.pts.push(...live.pts);
+          had.kind = live.kind; had.color = live.color; had.size = live.size;
+        } else {
+          room.live.set(key, { by: ws.me.sid, ...live });
+        }
         return;
       }
 
@@ -1681,6 +1697,11 @@ setInterval(() => {
       for (const [sid, p] of r.pres) list.push([sid, p.cam, p.w, p.h]);
       r.pres.clear();
       broadcast(r, { t: 'presences', list });
+    }
+    if (r.live.size) {
+      const list = [...r.live.values()];
+      r.live.clear();
+      broadcast(r, { t: 'lives', list });
     }
   }
 }, CURSOR_FLUSH_MS);
