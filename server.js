@@ -640,13 +640,29 @@ async function handleFile(req, res, p) {
   if (cap === 'none') { res.writeHead(403); return res.end(); }
 
   const file = path.join(DIR.files, parts[1], parts[2]);
-  const buf = await fsp.readFile(file).catch(() => null);
-  if (!buf) { res.writeHead(404); return res.end(); }
-  res.writeHead(200, {
-    'content-type': MIME[path.extname(file)] || 'application/octet-stream',
-    'cache-control': 'private, max-age=31536000, immutable'
-  });
-  res.end(buf);
+  /* Картинка читалась в память целиком — до 16 МБ на запрос. Класс из ста
+     человек открывает доску со снимками одновременно, и это сотни мегабайт
+     буферов разом, в самый неудачный момент: начало занятия. Отдаём потоком,
+     памяти уходит один буфер чтения.
+
+     ETag тут дешёвый и точный: имя файла — отпечаток его содержимого (см.
+     handleUpload), значит другого содержимого под этим именем не будет
+     никогда. Заголовок immutable браузер и так слушает, но повторный заход
+     после чистки кэша теперь стоит 304, а не мегабайты. */
+  const st = await fsp.stat(file).catch(() => null);
+  if (!st || !st.isFile()) { res.writeHead(404); return res.end(); }
+  const etag = '"' + parts[2] + '"';
+  const head = { 'content-type': MIME[path.extname(file)] || 'application/octet-stream',
+                 'cache-control': 'private, max-age=31536000, immutable', etag };
+  if (req.headers['if-none-match'] === etag) { res.writeHead(304, { etag }); return res.end(); }
+  head['content-length'] = st.size;
+  res.writeHead(200, head);
+  const stream = fs.createReadStream(file);
+  // оборвалась передача (закрыли вкладку) — закрываем и чтение, иначе
+  // дескриптор проживёт до сборки мусора
+  stream.on('error', () => res.destroy());
+  res.on('close', () => stream.destroy());
+  stream.pipe(res);
 }
 
 /** Картинки, на которые больше никто не ссылается. Сутки отсрочки — потому
