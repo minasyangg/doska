@@ -744,6 +744,21 @@ const S={tool:'pen',size:4,color:PENS[0],penColor:PENS[0],markerColor:MARKERS[0]
 let items=[];                       // всё содержимое доски (линии и картинки)
 const byId=new Map();
 let undoStack=[], redoStack=[];
+/* Потолок истории отмен.
+
+   Записи копились без всякой границы. Для стирания запись держит ЦЕЛЫЕ
+   объекты со всеми точками — то есть стёртое с доски продолжало занимать
+   память до перезагрузки страницы, и за длинный урок с парой массовых стираний
+   это набегало вполне заметно на планшете ученика.
+
+   Двести шагов заведомо больше того, на сколько возвращаются руками; глубже
+   всё равно проще стереть и написать заново. Стек отмен ограничивает и стек
+   возврата: тот пополняется только из него. */
+const UNDO_MAX=200;
+function recordUndo(op){
+  undoStack.push(op);
+  if(undoStack.length>UNDO_MAX)undoStack.shift();
+}
 
 const toWorld=(sx,sy)=>({x:(sx-S.cam.x)/S.cam.z, y:(sy-S.cam.y)/S.cam.z});
 const toScreen=(wx,wy)=>({x:wx*S.cam.z+S.cam.x, y:wy*S.cam.z+S.cam.y});
@@ -3942,7 +3957,7 @@ function endPointer(e){
                 x:x0,y:y0,w:Math.max(0.5,w0),h:Math.max(0.5,h0),rot:0,
                 color:S.color,size:S.size,dash:S.dash,fill:S.fill,locked:false};
       addItem(it);
-      undoStack.push({type:'add',item:it});redoStack.length=0;
+      recordUndo({type:'add',item:it});redoStack.length=0;
       net.send({t:'add',item:deflate(it)});
     }
     drawLive();
@@ -4081,7 +4096,7 @@ function commit(){
   s.pts=simplifyStroke(s.pts,0.35/S.cam.z,0.06);
   s.bbox=null;
   addItem(s);
-  undoStack.push({type:'add',item:s});redoStack.length=0;
+  recordUndo({type:'add',item:s});redoStack.length=0;
   net.send({t:'add',item:deflate(s)});net.sid=null;net.sent=0;
 }
 function abortStroke(){if(current){current=null;drawId=null;net.sid=null;drawLive();}}
@@ -4170,7 +4185,7 @@ function commitPath(kind,pts){
   const ops=[{type:'add',item:it}];
   const label=applyPhysicsLabel(kind,pts);         // транспортир/линейка — подпись рядом
   if(label)ops.push(label);
-  undoStack.push(ops.length===1?ops[0]:{type:'batch',ops});redoStack.length=0;
+  pushUndo(ops);
 }
 function commitPathDraft(){
   if(!pathDraft)return;
@@ -4230,7 +4245,7 @@ function eraseAt(pt){
 function commitErase(){
   if(!erasedBatch.length)return;
   net.send({t:'erase',ids:erasedBatch.map(i=>i.id)});
-  undoStack.push({type:'erase',items:erasedBatch.slice()});redoStack.length=0;
+  recordUndo({type:'erase',items:erasedBatch.slice()});redoStack.length=0;
   erasedBatch=[];
 }
 
@@ -4333,7 +4348,7 @@ async function placeImage(blob,screenPt){
     const it={id:newId(),by:S.me&&S.me.uid,type:'image',url:data.url,
               x:c.x-w/2,y:c.y-h/2,w,h,rot:0,locked:false};
     addItem(it);
-    undoStack.push({type:'add',item:it});redoStack.length=0;
+    recordUndo({type:'add',item:it});redoStack.length=0;
     net.send({t:'add',item:deflate(it)});
     setTool('select');select(it);
     hint('Картинка вставлена: тяните за углы, чтобы изменить размер');
@@ -4366,7 +4381,7 @@ function placePhysics(kind,w){
   const it={id:newId(),by:S.me&&S.me.uid,type:'physics',kind,
             x:w.x-size.w/2,y:w.y-size.h/2,w:size.w,h:size.h,rot:0,locked:false,props};
   addItem(it);
-  undoStack.push({type:'add',item:it});redoStack.length=0;
+  recordUndo({type:'add',item:it});redoStack.length=0;
   net.send({t:'add',item:deflate(it)});
   setTool('select');select(it);
   hint((PHYSICS_TITLE[kind]||'Объект')+' поставлен: тяните и вращайте как обычно');
@@ -4643,7 +4658,7 @@ stage.addEventListener('drop',e=>{
    несколько объектов: выделенную группу надо отменять целиком, а не по
    объекту за нажатие. */
 function pushUndo(ops){
-  undoStack.push(ops.length===1?ops[0]:{type:'batch',ops});
+  recordUndo(ops.length===1?ops[0]:{type:'batch',ops});
   redoStack.length=0;
 }
 const dropFromSelection=id=>{if(selection.some(s=>s.id===id))selectMany(selection.filter(s=>s.id!==id));};
@@ -4671,7 +4686,7 @@ function undo(){
 }
 function redo(){
   const op=redoStack.pop();if(!op)return;
-  redoOp(op);undoStack.push(op);drawBoard();refreshSelBar();drawLive();
+  redoOp(op);recordUndo(op);drawBoard();refreshSelBar();drawLive();
 }
 
 /* ═══════════════════ интерфейс доски ═══════════════════ */
@@ -5437,7 +5452,7 @@ document.getElementById('selDel').onclick=()=>{
   const ids=list.map(it=>it.id);
   for(const id of ids)removeItem(id);
   net.send({t:'erase',ids});
-  undoStack.push({type:'erase',items:list});redoStack.length=0;drawBoard();
+  recordUndo({type:'erase',items:list});redoStack.length=0;drawBoard();
 };
 function duplicateSelected(){
   const list=selection.filter(it=>!it.locked);
@@ -5545,7 +5560,7 @@ function copySelected(cut){
     const ids=alive.map(it=>it.id);
     for(const id of ids)removeItem(id);
     net.send({t:'erase',ids});
-    undoStack.push({type:'erase',items:alive});redoStack.length=0;drawBoard();
+    recordUndo({type:'erase',items:alive});redoStack.length=0;drawBoard();
   }
 }
 function pasteClipboard(at){
