@@ -217,8 +217,22 @@ const jsonBody = async req =>
 const str = (v, max) => String(v == null ? '' : v).trim().slice(0, max);
 
 /* Попытки входа: свой счётчик, чтобы не выжигать общий лимит Supabase по IP
-   (доска для него — один адрес на всех). */
+   (доска для него — один адрес на всех).
+
+   Ключей два — адрес и почта, — и почту называет тот, кто стучится. Записи
+   стирались только в loginBlocked, и только если по этому же ключу приходил
+   новый запрос уже после истечения срока. То есть перебор по случайным
+   адресам почты наращивал карту, которую никто не разбирал: попыток по каждому
+   такому ключу больше не будет, значит и повода удалить запись не возникнет
+   никогда. Поэтому здесь и уборка по времени, и жёсткий потолок. */
 const attempts = new Map();
+const ATTEMPT_MAX = 20000;
+function sweepAttempts() {
+  const now = Date.now();
+  for (const [k, a] of attempts) if (now > a.until) attempts.delete(k);
+}
+setInterval(sweepAttempts, 10 * 60 * 1000).unref();
+
 function loginBlocked(key) {
   const a = attempts.get(key);
   if (!a) return 0;
@@ -226,9 +240,17 @@ function loginBlocked(key) {
   return a.n >= 5 ? Math.ceil((a.until - Date.now()) / 1000) : 0;
 }
 function loginFailed(key) {
-  const a = attempts.get(key) || { n: 0, until: 0 };
+  const a = attempts.get(key);
+  if (!a) {
+    // Потолок проверяем только когда заводим новый ключ: уже начатый счёт
+    // обязан дорасти до блокировки, иначе переполнение карты становится
+    // способом эту блокировку обойти.
+    if (attempts.size >= ATTEMPT_MAX) sweepAttempts();
+    if (attempts.size >= ATTEMPT_MAX) return;
+    attempts.set(key, { n: 1, until: Date.now() + 15 * 60 * 1000 });
+    return;
+  }
   a.n++; a.until = Date.now() + 15 * 60 * 1000;
-  attempts.set(key, a);
 }
 
 /** Общий вход в сессию: обменяли токены — поставили куку. */
