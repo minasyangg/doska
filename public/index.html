@@ -3046,6 +3046,24 @@ const net={
       }
       case 'left':{const p=peers.get(m.id);peers.delete(m.id);cursors.delete(m.id);peerViews.delete(m.id);
         renderPeers();if(p)hint(p.name+' вышел');break;}
+      // Курсоры и области приходят пачкой на всю комнату, а не по сообщению
+      // на человека: так их в сто раз меньше по числу кадров (см. замер в
+      // scripts/load-test.js — именно на них доска и упиралась). Пачка идёт
+      // всем, включая нас самих, поэтому свой курсор пропускаем — рисовать
+      // собственный незачем, он и так под рукой.
+      case 'cursors':{
+        const me=S.me&&S.me.id, t=performance.now();
+        for(const c of m.list||[]){ if(c[0]===me)continue; cursors.set(c[0],{x:c[1],y:c[2],t}); }
+        drawLive();break;
+      }
+      case 'presences':{
+        const me=S.me&&S.me.id, t=performance.now();
+        for(const p of m.list||[]){ if(p[0]===me)continue;
+          peerViews.set(p[0],{cam:p[1],w:p[2],h:p[3],seen:t}); }
+        drawLive();break;
+      }
+      // одиночные — от сервера прежней версии: во время выкладки уже открытые
+      // вкладки продолжают работать, пока их не перезагрузят
       case 'presence':peerViews.set(m.id,{cam:m.cam,w:m.w,h:m.h,seen:performance.now()});drawLive();break;
       case 'title':setTitle(m.title);break;
       case 'live':{
