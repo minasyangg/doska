@@ -876,6 +876,76 @@ const OP_NAMES = new Set(['join', 'add', 'move', 'erase', 'restore', 'z',
                           'lock', 'clear']);
 const opLabel = t => (typeof t === 'string' && OP_NAMES.has(t)) ? t : 'other';
 
+/* ═══════ ретрансляция: проверка и частота ═══════
+
+   Пять типов сообщений сервер не хранит, а просто пересылает остальным:
+   живой штрих, курсор, видимая область, камера владельца и «все ко мне». До
+   этого они уходили дальше ровно в том виде, в каком пришли, — то есть чужой
+   клиент мог прислать что угодно, и это что угодно размножалось на всех
+   участников комнаты. При потолке кадра в 2 МБ и сотне человек одно сообщение
+   давало до 200 МБ исходящего трафика.
+
+   Проверять их как обычные объекты (CLEANERS) незачем: они никуда не
+   записываются и живут до следующего такого же. Нужно ровно одно — чтобы
+   размер и форма были предсказуемыми.
+
+   Частоту ограничиваем только здесь. Обычные правки (add/move/erase) под
+   лимит не попадают сознательно: клиент шлёт их по одному сообщению на
+   объект, и групповая операция вроде «выделить всё → повернуть» законно даёт
+   тысячи подряд. Отбрасывать их значило бы молча терять чужую работу, а
+   закрывать сокет — терять её же, только заметно. Сначала нужно научить
+   клиента слать такое одним сообщением; пока этого нет, лимит на них не
+   ставим. Потерять же кадр курсора или живого штриха безвредно по самой их
+   природе: следующий кадр через 45-55 мс всё равно всё перекроет. */
+
+const fin = (v, d) => Number.isFinite(+v) ? +v : d;
+const LIVE_KINDS = new Set(['pen', 'marker']);
+/* Точек в кадре живого штриха. Клиент шлёт накопленное за 45 мс — это единицы,
+   от силы десятки даже с пера на 120 Гц. 512 взяты с большим запасом: смысл
+   не в точности границы, а в том, что она вообще есть. */
+const LIVE_MAX_PTS = 512;
+
+function cleanLive(m) {
+  if (!Array.isArray(m.pts)) return null;
+  const src = m.pts.slice(0, LIVE_MAX_PTS);
+  const pts = new Array(src.length);
+  for (let i = 0; i < src.length; i++) {
+    const a = Array.isArray(src[i]) ? src[i] : [];
+    pts[i] = [fin(a[0], 0), fin(a[1], 0), Math.max(0, Math.min(1, fin(a[2], 0.5)))];
+  }
+  return {
+    // sid — ключ, по которому получатель складывает кадры одного штриха
+    // (remoteLive у клиента). Своей длины у него нет, поэтому задаём здесь.
+    sid: String(m.sid == null ? '' : m.sid).slice(0, 48),
+    from: m.from | 0,
+    pts,
+    kind: LIVE_KINDS.has(m.kind) ? m.kind : 'pen',
+    color: String(m.color == null ? '#1A1C20' : m.color).slice(0, 24),
+    size: Math.min(600, Math.max(0.2, fin(m.size, 2))),
+  };
+}
+/* Камера: три числа, ничего больше. Раньше сюда проходил любой объект, и у
+   получателя S.cam.z становился чем угодно вплоть до NaN — после такого доска
+   у него просто гасла, и вернуть её можно было только перезагрузкой. */
+const cleanCam = c => ({
+  x: fin(c && c.x, 0), y: fin(c && c.y, 0),
+  z: Math.min(64, Math.max(0.01, fin(c && c.z, 1))),
+});
+
+/* Ведро токенов на сокет: RATE_PER_SEC в среднем, RATE_BURST разом.
+   Законный клиент шлёт около 50 таких сообщений в секунду (штрих 22, курсор
+   18, область 4, камера 8) — запас больше чем двукратный. */
+const RATE_PER_SEC = 120;
+const RATE_BURST = 240;
+function mayRelay(ws) {
+  const b = ws.relay, now = Date.now();
+  b.n = Math.min(RATE_BURST, b.n + (now - b.at) * RATE_PER_SEC / 1000);
+  b.at = now;
+  if (b.n < 1) { metrics.inc('doska_relay_dropped_total'); return false; }
+  b.n -= 1;
+  return true;
+}
+
 const send = (ws, o) => { if (ws.readyState === 1) ws.send(JSON.stringify(o)); };
 function broadcast(room, o, except) {
   const s = JSON.stringify(o);
@@ -1256,6 +1326,7 @@ wss.on('connection', (ws, req) => {
   // «стереть своё» переживает переподключение.
   ws.me = { sid: 'u' + (++seq) + Date.now().toString(36).slice(-3), uid: null,
             name: 'Гость', cap: 'none', color: COLORS[seq % COLORS.length] };
+  ws.relay = { n: RATE_BURST, at: Date.now() };   // ведро на ретрансляции
 
   ws.on('message', async raw => {
     let m; try { m = JSON.parse(raw); } catch { metrics.inc('doska_bad_messages_total'); return; }
@@ -1312,11 +1383,13 @@ wss.on('connection', (ws, req) => {
     const mine = it => owner || room.anyEdit || (it.by != null && it.by === ws.me.uid);
 
     switch (m.t) {
-      case 'live':
-        if (!mayEdit) return;
-        broadcast(room, { t: 'live', by: ws.me.sid, sid: m.sid, from: m.from | 0,
-                          pts: m.pts, kind: m.kind, color: m.color, size: m.size }, ws);
+      case 'live': {
+        if (!mayEdit || !mayRelay(ws)) return;
+        const live = cleanLive(m);
+        if (!live) return;
+        broadcast(room, { t: 'live', by: ws.me.sid, ...live }, ws);
         return;
+      }
 
       case 'add': {
         if (!mayEdit) return;
@@ -1419,29 +1492,30 @@ wss.on('connection', (ws, req) => {
 
       case 'cursor':
         // курсор рисует и наблюдатель, но не тот, кого уже отключили от доски
-        if (ws.me.cap === 'none') return;
-        broadcast(room, { t: 'cursor', id: ws.me.sid, x: m.x, y: m.y }, ws);
+        if (ws.me.cap === 'none' || !mayRelay(ws)) return;
+        broadcast(room, { t: 'cursor', id: ws.me.sid, x: fin(m.x, 0), y: fin(m.y, 0) }, ws);
         return;
 
       case 'view':
-        if (!owner) return;
-        broadcast(room, { t: 'view', cam: m.cam, w: m.w }, ws);
+        if (!owner || !mayRelay(ws)) return;
+        broadcast(room, { t: 'view', cam: cleanCam(m.cam), w: fin(m.w, 0) }, ws);
         return;
 
       // Своя видимая область — от кого угодно, не только от владельца: это
       // просто «вот где я сейчас смотрю» для стрелок-указателей у чужого
       // края экрана, а не управление чьей-то камерой (в отличие от 'view').
       case 'presence':
-        if (ws.me.cap === 'none') return;
-        broadcast(room, { t: 'presence', id: ws.me.sid, cam: m.cam, w: m.w, h: m.h }, ws);
+        if (ws.me.cap === 'none' || !mayRelay(ws)) return;
+        broadcast(room, { t: 'presence', id: ws.me.sid, cam: cleanCam(m.cam),
+                          w: fin(m.w, 0), h: fin(m.h, 0) }, ws);
         return;
 
       /* «Все ко мне»: преподаватель разово переносит участников к тому месту,
          где объясняет. От 'view' отличается тем, что применяется независимо от
          того, включил ли участник слежение. */
       case 'callAll':
-        if (!owner) return;
-        broadcast(room, { t: 'goto', cam: m.cam, w: m.w }, ws);
+        if (!owner || !mayRelay(ws)) return;
+        broadcast(room, { t: 'goto', cam: cleanCam(m.cam), w: fin(m.w, 0) }, ws);
         return;
 
       case 'lock':
