@@ -1115,6 +1115,19 @@ function drawArrowhead(ctx,from,tip,style,size,color){
   else if(style===3){ctx.beginPath();ctx.arc(-wid/2,0,wid/2,0,6.2832);ctx.fill();}
   ctx.restore();
 }
+// Компактная стрелка для осей графика — drawArrowhead тут не годится:
+// у него нижний порог размера (не меньше 6 условных единиц), рассчитанный
+// на векторы/линии самой доски, для тонких служебных осей это слишком
+// грубо. Размер — ровно size без пола, вершина строго в (tipX,tipY),
+// т.е. на самом краю рамки графика, без зазора.
+function drawAxisArrow(ctx,tipX,tipY,dirX,dirY,size,color){
+  const len=size*2.1, wid=size*1.3;
+  ctx.save();ctx.translate(tipX,tipY);ctx.rotate(Math.atan2(dirY,dirX));
+  ctx.beginPath();ctx.moveTo(-len,-wid/2);ctx.lineTo(0,0);ctx.lineTo(-len,wid/2);
+  ctx.strokeStyle=color;ctx.lineWidth=Math.max(1,size*0.55);ctx.lineCap='round';ctx.lineJoin='round';
+  ctx.stroke();
+  ctx.restore();
+}
 /* линия/полилиния/кривая/полигон. closed — только у полигона (заливка
    только для него). Кривая переиспользует trace() — тот же сглаживающий
    алгоритм, что рисует штрихи пера, без отдельной сплайн-математики. */
@@ -2161,13 +2174,27 @@ function paintGraph(ctx,it){
   // переставала мельчать при увеличении доски колесом — оставалась той же
   // в мировых единицах, а на экране только росла вместе с доской
   const pxPerUnit=view.scale*(S.cam.z||1);
-  const stepX=graphNiceStep(80/pxPerUnit), stepY=graphNiceStep(80/pxPerUnit);
+  // Цель по X крупнее, чем по Y: горизонтальная подпись — это строка
+  // цифр шириной в несколько символов, ей нужно больше зазора между
+  // соседними делениями, чем вертикальной (та всего на строку выше/ниже
+  // своей линии). Одинаковая цель в 80px раньше давала на X ровно те же
+  // деления, что и на Y, и при мелком шаге (глубокий зум) подписи по X
+  // упирались друг в друга гораздо раньше, чем по Y.
+  const stepX=graphNiceStep(130/pxPerUnit), stepY=graphNiceStep(80/pxPerUnit);
   ctx.strokeStyle='rgba(0,0,0,.08)';ctx.lineWidth=uiScale;
   ctx.font=tickSize+'px ui-sans-serif,system-ui,sans-serif';ctx.fillStyle='rgba(0,0,0,.45)';
   ctx.textAlign='center';ctx.textBaseline='top';
+  let lastLabelRight=-Infinity;
   for(let mx=Math.ceil(toMx(bx)/stepX)*stepX;mx<=toMx(bx+bw);mx+=stepX){
     const sx=toSx(mx);ctx.beginPath();ctx.moveTo(sx,by);ctx.lineTo(sx,by+bh);ctx.stroke();
-    if(Math.abs(mx)>stepX*0.01)ctx.fillText(graphFmtNum(mx,stepX),sx,xAxisY+3);   // «0» подписывает вертикальная сетка
+    if(Math.abs(mx)<=stepX*0.01)continue;   // «0» подписывает вертикальная сетка
+    const txt=graphFmtNum(mx,stepX), half=ctx.measureText(txt).width/2;
+    // Подстраховка сверх подобранной цели по шагу: если всё же соседняя
+    // подпись перекрылась бы (например узкий бокс графика поджал вид),
+    // просто пропускаем её вместо нечитаемой каши цифр друг на друге.
+    if(sx-half<lastLabelRight)continue;
+    ctx.fillText(txt,sx,xAxisY+3);
+    lastLabelRight=sx+half+2*uiScale;
   }
   ctx.textAlign='right';ctx.textBaseline='middle';
   for(let my=Math.ceil(toMy(by+bh)/stepY)*stepY;my<=toMy(by);my+=stepY){
@@ -2185,14 +2212,14 @@ function paintGraph(ctx,it){
   // что и линия оси, из-за чего выглядели грубовато); упираются в истинную
   // границу рамки, а не в нижний край шапки — вертикальная ось теперь
   // доходит до верха ровно так же, как горизонтальная доходит до правого края
-  const AXIS_ARROW='rgba(0,0,0,.7)', arrowLen=11*uiScale, arrowSize=3.5*uiScale;
+  const AXIS_ARROW='rgba(0,0,0,.7)', arrowSize=2.6*uiScale;
   ctx.strokeStyle='rgba(0,0,0,.4)';ctx.fillStyle='rgba(0,0,0,.4)';ctx.lineWidth=1.4*uiScale;
   ctx.setLineDash(yAxisPinned?[5*uiScale,4*uiScale]:[]);
   ctx.beginPath();ctx.moveTo(yAxisX,by);ctx.lineTo(yAxisX,by+bh);ctx.stroke();
-  if(!yAxisPinned)drawArrowhead(ctx,{x:yAxisX,y:by+arrowLen},{x:yAxisX,y:by+1},1,arrowSize,AXIS_ARROW);
+  if(!yAxisPinned)drawAxisArrow(ctx,yAxisX,by,0,-1,arrowSize,AXIS_ARROW);
   ctx.setLineDash(xAxisPinned?[5*uiScale,4*uiScale]:[]);
   ctx.beginPath();ctx.moveTo(bx,xAxisY);ctx.lineTo(bx+bw,xAxisY);ctx.stroke();
-  if(!xAxisPinned)drawArrowhead(ctx,{x:bx+bw-arrowLen,y:xAxisY},{x:bx+bw-1,y:xAxisY},1,arrowSize,AXIS_ARROW);
+  if(!xAxisPinned)drawAxisArrow(ctx,bx+bw,xAxisY,1,0,arrowSize,AXIS_ARROW);
   ctx.setLineDash([]);
   ctx.textAlign='right';ctx.textBaseline='middle';
   ctx.fillText('0',yAxisX-4,xAxisY+3);   // подпись начала координат — единственная общая для обеих осей
