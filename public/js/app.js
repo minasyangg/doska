@@ -261,6 +261,7 @@ addEventListener('popstate',route);
 route();
 }
 
+/* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  SSO_MARK, askGuestWay, askName, boardUi, cfgP, config, mckoEnter, nav, openBoard, route, showBoard, showView, ssoDone,
+  nav, showBoard,
 };

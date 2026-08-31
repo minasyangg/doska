@@ -809,6 +809,9 @@ document.getElementById('selDel').onclick=()=>{
 };
 }
 
+/* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  CAP_NAME, CUSTOM_WHEEL, EXTRA_TOOLS, HINT_DEFAULT, NO_FILL_BG, PEN_TITLE, applyDockPinned, applyExtraTool, applyRole, applyStyleToSelection, buildMoreMenu, buildPathMenu, buildPenMenu, buildShapesMenu, closeAllPopovers, copyLink, deniedScreen, dockEdge, dockEl, drawPreview, duplicateSelected, escapeHtml, fillPeersPop, findExtraTool, followEl, followVal, hint, hintTimer, inkCustomInput, inksEl, linkPop, moreBtn, moreMenu, moreOpen, narrowScreen, openPenPanel, palette, pathBtn, pathMenu, pathOpen, pctx, peersPop, penBtn, penKindMenu, penOpen, pinnedToolIds, popOpen, popoverToggle, positionSubtools, prev, renderFills, renderInks, renderPeers, renderPinnedTools, sensEl, sensVal, setConn, setInkColor, setTitle, setTool, shapeIcon, shapesBtn, shapesMenu, shapesOpen, sizeEl, sizeVal, syncMoreMenuPins, syncPathIcon, syncPenIcon, syncShapeIcon, toClipboard, toggleExtraPin, topMorePop, touchOnly, updateDashButtons, updatePenPanel,
+  HINT_DEFAULT, applyRole, closeAllPopovers, copyLink, deniedScreen, drawPreview,
+  duplicateSelected, escapeHtml, hint, popOpen, prev, renderInks, renderPeers, setConn,
+  setTitle, setTool, toClipboard, updatePenPanel,
 };

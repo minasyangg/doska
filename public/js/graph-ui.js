@@ -183,6 +183,7 @@ stage.addEventListener('drop',e=>{
 
 }
 
+/* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  GRAPH_PARAM_RE, activeGraphItem, graphChanged, renderGraphExpressions, renderGraphParams,
+  renderGraphExpressions, renderGraphParams,
 };

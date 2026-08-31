@@ -387,6 +387,7 @@ addEventListener('resize',()=>{resize();refreshSelBar();});
 
 }
 
+/* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  MENU_ICONS, applyZ, clipboard, closeMenu, copySelected, groupSelected, menuAt, menuEl, menuHead, menuItem, menuSep, moveLayer, openMenu, pasteClipboard, rotateSelection, selectAll, setGrid, ungroupSelected, withGroup,
+  applyZ, openMenu, withGroup,
 };

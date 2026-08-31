@@ -278,6 +278,8 @@ function paintItem(ctx,it){
 export function __init() {
 }
 
+/* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  P, PATH_KINDS, SHAPES, SHAPE_GROUPS, SHAPE_NAMES, drawArrowhead, drawAxisArrow, paintItem, paintPath, paintShape, reg, shapeContour, star5,
+  SHAPES, SHAPE_GROUPS, SHAPE_NAMES, drawArrowhead, drawAxisArrow, paintItem, paintPath,
+  paintShape,
 };

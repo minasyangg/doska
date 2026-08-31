@@ -565,6 +565,8 @@ setInterval(thermalTick,400);
 
 }
 
+/* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  FIELD_K, FIELD_LINES, FIELD_MAX_STEPS, FIELD_SINK, FIELD_STEP, MATERIALS, PHASE_COLOR, PHASE_NAME, RAY_ESCAPE, RAY_MAX_BOUNCES, bodyState, compassAngle, elementSegment, fieldAt, fieldLinesFor, heatersOn, magnetFieldAt, magnetPoles, magnetsSignature, nearestSouthDist, opticalElements, opticsCache, opticsSignature, paintBody, paintCalorimeter, paintFieldLines, paintHeater, paintHeatingGraph, paintLens, paintMirror, paintRays, paintSource, physicsAngleCache, physicsFieldCache, poleField, raySegmentHit, raysFor, reflectDir, refractThroughLens, sourceRays, tempFromEnergy, thermalHistory, thermalLastTick, thermalTick, traceFieldLines, traceRay,
+  compassAngle, paintBody, paintCalorimeter, paintFieldLines, paintHeater, paintLens,
+  paintMirror, paintSource,
 };

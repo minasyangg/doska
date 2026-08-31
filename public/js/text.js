@@ -183,6 +183,7 @@ function getImg(url){
 export function __init() {
 }
 
+/* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  TEXT_LH, getImg, hitTest, hitTestPath, imgCache, paintText, shapeOutline, textFont, textHeight, textLines,
+  getImg, hitTest, paintText, textHeight,
 };

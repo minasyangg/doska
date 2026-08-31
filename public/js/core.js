@@ -203,6 +203,9 @@ export function __init() {
 /* ═══════════════════ хранилище и API ═══════════════════ */
 }
 
+/* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  FILLS, GRID_MODES, GRID_NAMES, MARKERS, PAPER, PENS, S, STREAMLINE, STYLED, UNDO_MAX, api, bctx, board, byId, dpr, guestId, items, lctx, live, mkStroke, outlinePath, paintStroke, pushPoint, radii, recordUndo, redoStack, simPressure, stage, store, toScreen, toWorld, trace, undoStack,
+  FILLS, GRID_MODES, GRID_NAMES, PAPER, PENS, S, STYLED, api, bctx, board, byId, dpr, guestId,
+  items, lctx, live, mkStroke, outlinePath, paintStroke, pushPoint, recordUndo, redoStack,
+  simPressure, stage, store, toScreen, toWorld, trace, undoStack,
 };

@@ -475,6 +475,7 @@ document.getElementById('newBoard').onclick=async()=>{
    Всё, что здесь меняется, проверяется ещё раз на сервере и в RLS. */
 }
 
+/* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  ALARM, FORMAT, ICON_EDIT, ICON_GEAR, ICON_LINK, ICON_TRASH, boardCard, dash, grid, humanBytes, humanTime, loadBoards, loadStats, loginEl, myBoards, openSettings, renameOnCard, renderBoards, renderWho, statsTimer, when,
+  dash, grid, loadBoards, loginEl, openSettings, renderWho,
 };

@@ -304,6 +304,7 @@ setInterval(()=>{
 
 }
 
+/* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  DEFLATE, INFLATE, PATCHABLE, addItem, applyLive, boardLoaded, boardLoaderEl, boardLoaderText, boardLoaderTimer, deflate, deflateStroke, hideBoardLoader, inflate, inflateStroke, net, removeItem, showBoardLoader,
+  addItem, boardLoaded, deflate, inflate, net, removeItem, showBoardLoader,
 };

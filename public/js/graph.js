@@ -686,6 +686,9 @@ function paintArc(ctx,it){
 export function __init() {
 }
 
+/* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  GRAPH_COLORS, GRAPH_CONSTS, GRAPH_FUNCS, GRAPH_HEADER_H, GRAPH_INV_TRIG, GRAPH_TRIG, cloneProps, drawGraphLegendChip, findTopLevelEquals, graphAstCache, graphAxisLabelPos, graphClassify, graphCollectVars, graphCompile, graphEval, graphExprOk, graphFmtNum, graphNiceStep, graphParse, graphParseExpr, graphPointY, graphTokenize, nextPointLabel, paintArc, paintGraph, paintGraphCoordHint, paintImplicitCurve, paintPhysics, splitTopLevelComma, zoomGraphAt,
+  GRAPH_COLORS, GRAPH_HEADER_H, cloneProps, graphAxisLabelPos, graphCompile, graphEval,
+  graphExprOk, graphPointY, nextPointLabel, paintArc, paintGraphCoordHint, paintPhysics,
+  zoomGraphAt,
 };

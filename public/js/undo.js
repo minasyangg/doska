@@ -56,6 +56,7 @@ function redo(){
 export function __init() {
 }
 
+/* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  dropFromSelection, pushUndo, redo, redoOp, undo, undoOp,
+  dropFromSelection, pushUndo, redo, undo,
 };

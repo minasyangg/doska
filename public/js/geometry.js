@@ -99,6 +99,7 @@ function bboxOf(it){
 export function __init() {
 }
 
+/* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
   ARC_TYPES, BACK_TYPES, BOX_TYPES, SELECTABLE, arcPt, arcSweep, bboxOf, normAngle, rotAround,
 };

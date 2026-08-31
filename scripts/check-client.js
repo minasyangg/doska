@@ -205,19 +205,24 @@ function linker(spec, referrer) {
                   : typeof v.size === 'number' ? v.size
                   : typeof v.length === 'number' ? v.length
                   : typeof v === 'object' ? Object.keys(v).length : -1;
+  /* Проверяем только МЕЖМОДУЛЬНЫЕ реестры — те, что один модуль вывозит, а
+     другой ввозит. Именно там и живут ошибки порядка: реестр, оставшийся
+     внутри своего модуля, к моменту использования гарантированно готов, а
+     ради проверки вывозить его наружу значило бы врать про границы модуля. */
   const PROBES = [
-    ['shapes.js',  'SHAPES',      'каталог фигур'],
-    ['shapes.js',  'SHAPE_GROUPS','разделы каталога фигур'],
-    ['geometry.js','BOX_TYPES',   'типы с рамкой'],
-    ['geometry.js','SELECTABLE',  'выделяемые типы'],
-    ['net.js',     'PATCHABLE',   'какие поля принимает move'],
-    ['net.js',     'DEFLATE',     'сериализация по типам'],
-    ['net.js',     'INFLATE',     'разбор по типам'],
-    ['toolbar.js', 'EXTRA_TOOLS', 'дополнительные инструменты'],
-    ['menu.js',    'MENU_ICONS',  'значки меню'],
-    ['graph.js',   'GRAPH_FUNCS', 'функции графика'],
-    ['physics.js', 'MATERIALS',   'вещества'],
-    ['core.js',    'PENS',        'цвета пера'],
+    ['core.js',     'PENS',         'цвета пера'],
+    ['core.js',     'FILLS',        'цвета заливки'],
+    ['core.js',     'GRID_MODES',   'виды сетки'],
+    ['core.js',     'GRID_NAMES',   'названия сеток'],
+    ['core.js',     'STYLED',       'типы со стилем'],
+    ['geometry.js', 'BOX_TYPES',    'типы с рамкой'],
+    ['geometry.js', 'BACK_TYPES',   'типы, рисуемые снизу'],
+    ['geometry.js', 'SELECTABLE',   'выделяемые типы'],
+    ['geometry.js', 'ARC_TYPES',    'типы дуг'],
+    ['shapes.js',   'SHAPES',       'каталог фигур'],
+    ['shapes.js',   'SHAPE_GROUPS', 'разделы каталога фигур'],
+    ['shapes.js',   'SHAPE_NAMES',  'названия фигур'],
+    ['graph.js',    'GRAPH_COLORS', 'цвета кривых'],
   ];
   const empty = [];
   for (const [file, name, what] of PROBES) {

@@ -422,6 +422,8 @@ export function __init() {
 /* ═══════════════════ камера ═══════════════════ */
 }
 
+/* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  CURSOR, RESIZE_CURSORS, ROTATE_CURSOR, applyCam, applyCursor, boardDirty, camChanged, cur, cursors, drawBoard, drawGrid, drawLive, flushBoard, flushLive, handleCursor, hoverHandleCursor, hoverPt, liveDirty, peerViews, peers, remoteLive, resize, roundRect, visRect, zoomAt,
+  applyCursor, camChanged, cursors, drawBoard, drawLive, handleCursor, hoverHandleCursor,
+  hoverPt, peerViews, peers, remoteLive, resize, zoomAt,
 };

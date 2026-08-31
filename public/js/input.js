@@ -1305,6 +1305,10 @@ document.getElementById('physMass').oninput=e=>{
 
 }
 
+/* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  GEOM_KEYS, IMG_MAX_SIDE, IMG_QUALITY, LOCK_OPEN, LOCK_SHUT, OPPOSITE_CORNER, PHYSICS_SIZE, PHYSICS_TITLE, UPLOADABLE, abortDraft, abortStroke, addTextLabel, angleAt, applyPhysicsLabel, arcDraft, autoGrowText, boxesOverlap, canEdit, closeTextEditor, commit, commitErase, commitPath, commitPathDraft, current, dragging, drawId, editing, endPointer, eraseAt, erasedBatch, eraserR, erasing, geomChanged, geomKeys, graphZoomSyncTimer, handleAt, handlesFor, inSelection, itemAt, itemsIn, lastPen, lastPt, lastT, localXY, marquee, mineOnly, newId, openTextEditor, panning, pathDraft, pinch, placeImage, placePhysics, pointers, prepareImage, pressure, refreshSelBar, resyncPanning, select, selectMany, selected, selection, selectionBox, seqNo, shapeDraft, simplifyStroke, snapGeom, snapshotItem, spaceDown, startMove, tStream, textEdit, updatePhysicsPanel, updateSelBar, wireGeom,
+  abortDraft, angleAt, arcDraft, canEdit, commitPathDraft, current, dragging, eraserR,
+  handlesFor, inSelection, itemAt, lastPt, localXY, marquee, mineOnly, newId, panning,
+  pathDraft, placeImage, refreshSelBar, resyncPanning, select, selectMany, selected, selection,
+  selectionBox, shapeDraft, snapGeom, spaceDown, updatePhysicsPanel, updateSelBar,
 };
