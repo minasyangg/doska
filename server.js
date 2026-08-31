@@ -800,8 +800,19 @@ const server = http.createServer(async (req, res) => {
 
   let rec = await loadStatic(file).catch(() => null);
   let ext = path.extname(file);
-  // нет такого файла — отдаём страницу, дальше маршрутизирует сам клиент
-  if (!rec) { rec = await loadStatic(path.join(PUBLIC, 'index.html')).catch(() => null); ext = '.html'; }
+  if (!rec) {
+    /* Запасной путь — только для адресов доски (/board/xxx, /login): их
+       разбирает сам клиент, и сервер отдаёт ему страницу.
+
+       Но для запроса с расширением так делать нельзя. Клиент теперь состоит
+       из полутора десятков модулей, и опечатка в пути импорта или файл, не
+       доехавший при выкладке, возвращали бы 200 с HTML вместо модуля: браузер
+       ругался бы на несовпадение типа, а по коду ответа всё выглядело бы
+       благополучно. Пусть отсутствующий файл честно отвечает 404. */
+    if (ext) { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('нет такого файла'); }
+    rec = await loadStatic(path.join(PUBLIC, 'index.html')).catch(() => null);
+    ext = '.html';
+  }
   if (!rec) { res.writeHead(404); return res.end('not found'); }
   return sendStatic(req, res, rec, ext);
 });
