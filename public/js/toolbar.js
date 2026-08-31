@@ -697,12 +697,15 @@ document.getElementById('title').onclick=async()=>{
   catch(e){hint('Не переименовалось: '+e.message);}
 };
 document.getElementById('selDel').onclick=()=>{
-  const list=selection.filter(it=>!it.locked);
+  // «Удалить» — явная команда, не взмах ластиком: закреплённое стирает тоже,
+  // потому и слать нужно с force — иначе тот же запрет на сервере, что
+  // бережёт закреплённое от ластика, откажет и здесь
+  const list=selection;
   if(!list.length)return;
   select(null);
   const ids=list.map(it=>it.id);
   for(const id of ids)removeItem(id);
-  net.send({t:'erase',ids});
+  net.send({t:'erase',ids,force:true});
   recordUndo({type:'erase',items:list});redoStack.length=0;drawBoard();
 };
 }

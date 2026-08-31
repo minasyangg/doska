@@ -246,8 +246,10 @@ function openMenu(screenPt,worldPt){
     menuItem('Переместить на передний план',']',()=>moveLayer('front'),{off:!edit||!unlocked,icon:'front'});
     menuItem('Переместить на задний план','[',()=>moveLayer('back'),{off:!edit||!unlocked,icon:'back'});
     menuSep();
+    // в отличие от остальных пунктов, удаление не требует открепления —
+    // это и есть тот самый второй путь стереть закреплённое
     menuItem('Удалить','Del',()=>document.getElementById('selDel').click(),
-      {off:!edit||!unlocked,icon:'del'});
+      {off:!edit,icon:'del'});
   }else{
     menuItem('Вставить','Ctrl+V',()=>pasteClipboard(worldPt),{off:!edit||!clipboard.length,icon:'paste'});
     menuItem('Выделить всё','Ctrl+A',selectAll,{off:!edit,icon:'all'});

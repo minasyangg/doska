@@ -366,7 +366,9 @@ function eraseAt(pt){
   const w=toWorld(pt.x,pt.y),r=eraserR();
   for(let i=items.length-1;i>=0;i--){
     const it=items[i];
-    if(!mineOnly(it))continue;
+    // закреплённое ластик не трогает вообще — ни при каком взмахе; убрать
+    // его можно только через «Удалить» (ПКМ) или сперва открепив
+    if(!mineOnly(it)||it.locked)continue;
     if(hitTest(it,w,r)){
       if(selected&&selected.id===it.id)select(null);
       erasedBatch.push(it);removeItem(it.id);drawBoard();

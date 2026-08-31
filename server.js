@@ -1565,9 +1565,15 @@ wss.on('connection', (ws, req) => {
       case 'erase': {
         if (!mayEdit) return;
         const ids = new Set((m.ids || []).slice(0, 5000).map(String));
+        // Ластик закреплённое не трогает — это гарантия сервера, а не только
+        // клиента: без нёе изменённый клиент мог бы стереть закреплённое тем
+        // же взмахом. «Удалить» (ПКМ) и отмена/повтор — уже не взмах, а
+        // осознанное действие человека, поэтому шлют force и обходят запрет;
+        // «своё/чужое» (mine) им это не отменяет.
+        const force = !!m.force;
         const gone = [];
         room.items = room.items.filter(it => {
-          if (!ids.has(it.id) || !mine(it) || it.locked) return true;
+          if (!ids.has(it.id) || !mine(it) || (it.locked && !force)) return true;
           gone.push(it.id); return false;
         });
         if (!gone.length) return;

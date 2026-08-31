@@ -18,7 +18,7 @@ const dropFromSelection=id=>{if(selection.some(s=>s.id===id))selectMany(selectio
 function undoOp(op){
   if(op.type==='batch'){for(let i=op.ops.length-1;i>=0;i--)undoOp(op.ops[i]);return;}
   if(op.type==='add'){dropFromSelection(op.item.id);
-    removeItem(op.item.id);net.send({t:'erase',ids:[op.item.id]});}
+    removeItem(op.item.id);net.send({t:'erase',ids:[op.item.id],force:true});}
   else if(op.type==='erase'){for(const it of op.items)addItem(it);
     net.send({t:'restore',items:op.items.map(deflate)});}
   else{const it=byId.get(op.id);if(it){Object.assign(it,op.before);it.bbox=bboxOf(it);
@@ -29,7 +29,9 @@ function redoOp(op){
   if(op.type==='add'){addItem(op.item);net.send({t:'add',item:deflate(op.item)});}
   else if(op.type==='erase'){const ids=op.items.map(i=>i.id);
     for(const id of ids){dropFromSelection(id);removeItem(id);}
-    net.send({t:'erase',ids});}
+    // после отмены объект вернулся закреплённым, каким и был, — без force
+    // повторное стирание отклонит тот же запрет, что защищает его от ластика
+    net.send({t:'erase',ids,force:true});}
   else{const it=byId.get(op.id);if(it){Object.assign(it,op.after);it.bbox=bboxOf(it);
     net.send({t:'move',id:it.id,...wireGeom(op.after)});}}
 }
