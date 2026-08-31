@@ -9,8 +9,10 @@
    хорошо ещё, если сразу, а не на редкой ветке вроде вкладки администратора.
 
    Что делает. Собирает граф модулей из public/js настоящим загрузчиком
-   (vm.SourceTextModule), выполняет его на заглушке браузера и вторым проходом
-   дёргает все развешенные обработчики.
+   (vm.SourceTextModule), выполняет его на заглушке браузера, показывает три
+   экрана (вход, доска, список досок) и последним проходом дёргает все
+   развешенные обработчики. Плюс две проверки по тексту, до всякого запуска:
+   запись в ввезённое имя и ссылка на разметку, которой нет.
 
    Почему настоящий загрузчик, а не склейка файлов. Склейка проверила бы, что
    код выполняется, но не проверила бы сами импорты: ввоз имени, которого сосед
@@ -20,16 +22,28 @@
 
    Учитывается ТОЛЬКО ошибка вида ReferenceError: всё прочее, что вылезает при
    вызове обработчика на заглушке, — это отсутствующее состояние доски, а не
-   дефект кода, и шуметь про него бессмысленно.
+   дефект кода, и шуметь про него бессмысленно. Считаются и отказы обещаний:
+   добрая половина кода доски асинхронна, а там ошибка наружу не выходит.
 
    Чего он НЕ проверяет. Ветки внутри обработчиков, куда поддельное событие не
-   заводит («если выделено больше одного»), остаются непройденными. Это не
-   замена ручной проверке, это сито на один, зато самый разрушительный класс
-   ошибок.
+   заводит («если выделено больше одного»), остаются непройденными. Имена
+   элементов, собранные из кусков ('#row'+i), не видны ни тексту, ни заглушке.
+   И класс, упомянутый где-нибудь в коде, считается существующим, даже если из
+   разметки его убрали, — сбор нарочно щедрый, чтобы не шуметь понапрасну.
+   Это не замена ручной проверке, это сито на несколько самых разрушительных
+   классов ошибок.
 
    Заглушка нарочно всеядная: любое свойство отдаёт объект, который можно и
    позвать, и сложить, и сравнить. Она не изображает браузер, она лишь не
    мешает коду доработать до конца.
+
+   Одно исключение из всеядности — поиск по идентификатору. Всеядность здесь
+   стоила дорого: раз заглушка отдаёт объект на любой запрос, обращение к
+   элементу, который из разметки удалили, для неё неотличимо от обращения к
+   живому. Поэтому document.getElementById сверяется с настоящей разметкой и
+   на неизвестное имя честно отдаёт null — как отдал бы браузер. Что объявлено
+   разметкой, собирает scripts/lib-dom-refs.js; он же ловит то же самое по
+   тексту, ещё до запуска.
 
    Запуск:  npm run check
    ============================================================ */
@@ -39,10 +53,16 @@ const path = require('path');
 const vm = require('vm');
 const { pathToFileURL } = require('url');
 const { findImportWrites } = require('./lib-import-writes');
+const { collectKnown, findDeadRefs } = require('./lib-dom-refs');
 
 const NL = String.fromCharCode(10);
 const JS_DIR = path.join(__dirname, '..', 'public', 'js');
 const ENTRY = path.join(JS_DIR, 'main.js');
+const HTML = path.join(__dirname, '..', 'public', 'index.html');
+
+/* Что разметка объявляет на самом деле. Нужно и заглушке (см. ниже), и
+   текстовой проверке, поэтому собирается один раз и до всего остального. */
+const known = collectKnown(HTML, JS_DIR);
 
 /* ── заглушка браузера ────────────────────────────────────────
    Один универсальный узел на всё: элемент, контекст холста, список узлов.
@@ -62,7 +82,7 @@ const TREE_KEYS = new Set(['parentNode', 'parentElement', 'closest', 'nextSiblin
                            'offsetParent']);
 const MAX_DEPTH = 8;
 
-function stubNode(name, depth) {
+function stubNode(name, depth, over) {
   depth = depth || 0;
   const fn = function () { return fn; };
   fn._name = name;
@@ -77,6 +97,7 @@ function stubNode(name, depth) {
   };
   return new Proxy(fn, {
     get(t, k) {
+      if (over && Object.prototype.hasOwnProperty.call(over, k)) return over[k];
       if (k === Symbol.toPrimitive) return () => 0;
       if (k === Symbol.iterator) return function* () {};
       if (k === 'then') return undefined;              // не путать с обещанием
@@ -99,11 +120,51 @@ function stubNode(name, depth) {
   });
 }
 
+/* Половина кода доски асинхронна (маршруты, открытие доски, обращения к
+   серверу). Ошибка в асинхронной функции не выбрасывается наружу, а тихо
+   становится отказом обещания, и обычный try/catch вокруг вызова её не видит:
+   проход отчитывался «всё хорошо», хотя route падал на первой же строке.
+   Ловим отказы отдельно и разбираем вместе со всем остальным. */
+const rejections = [];
+process.on('unhandledRejection', e => rejections.push(e));
+const settle = () => new Promise(r => setImmediate(r));
+
 const storage = { getItem: () => null, setItem() {}, removeItem() {} };
+
+/* ── поиск по идентификатору: тут заглушка честная ─────────────
+   Всеядность нужна затем, чтобы код доработал до конца, — но у поиска по
+   идентификатору она отнимает единственную осмысленную проверку. Здесь
+   заглушка сверяется с настоящей разметкой и на неизвестное имя отдаёт null,
+   как отдал бы браузер. Дальше код либо разыменует null и упадёт (ровно там,
+   где упал бы у ученика), либо просто ничего не найдёт, — но само обращение
+   уже записано, и о нём будет сказано.
+
+   Это добирает то, чего не видит текстовая проверка: идентификаторы, которые
+   в коде лежат не доводом вызова, а списком (app.js: boardUi) или
+   переменной. */
+const missingRefs = new Map();
+function elementById(id) {
+  id = String(id);
+  // глубина 2 — та же, что была у document.getElementById() до этой правки:
+  // от неё зависит, где обход дерева упрётся в потолок вложенности
+  if (known.ids.has(id)) return stubNode('#' + id, 2);
+  if (!missingRefs.has(id)) {
+    const at = String(new Error().stack || '').split(NL).find(l => l.includes('/js/'));
+    missingRefs.set(id, at ? at.trim() : 'место не определилось');
+  }
+  return null;
+}
 
 const sandbox = {
   console,
-  document: stubNode('document'),
+  document: stubNode('document', 0, {
+    getElementById: elementById,
+    querySelector(sel) {
+      const s = String(sel).trim();
+      return /^#[A-Za-z][\w-]*$/.test(s) ? elementById(s.slice(1))
+                                         : stubNode('document.querySelector()', 2);
+    },
+  }),
   localStorage: storage, sessionStorage: storage,
   location: { protocol: 'https:', host: 'tutpad.ru', hostname: 'tutpad.ru',
               pathname: '/', search: '', hash: '', href: 'https://tutpad.ru/' },
@@ -128,6 +189,10 @@ const sandbox = {
   matchMedia: () => ({ matches: false, addEventListener() {} }),
   getComputedStyle: () => stubNode('style'),
   alert() {}, confirm: () => true, prompt: () => null,
+  // Контекст vm даёт только интринсики языка — ни URL, ни URLSearchParams в
+  // нём нет. Без этой строки route падал на разборе адреса, то есть на
+  // отсутствии браузера, а не на собственной ошибке.
+  URLSearchParams,
   btoa: s => Buffer.from(String(s), 'binary').toString('base64'),
   atob: s => Buffer.from(String(s), 'base64').toString('binary'),
   ResizeObserver: function () { return { observe() {}, disconnect() {} }; },
@@ -184,6 +249,26 @@ function linker(spec, referrer) {
   } else {
     console.log('записи в ввезённые имена: нет');
   }
+
+  /* Ссылки на удалённую разметку — тоже по тексту и тоже до запуска.
+     Запуском такое ловится плохо: обращение сидит внутри обработчика, а до
+     обработчика поддельное событие доходит не всегда. В тексте же видно всё
+     сразу. Подробности — в scripts/lib-dom-refs.js. */
+  const dead = findDeadRefs(JS_DIR, known);
+  if (dead.found.length) {
+    failed = true;
+    console.error(NL + 'ССЫЛКА НА РАЗМЕТКУ, КОТОРОЙ НЕТ (' + dead.found.length + '):');
+    for (const d of dead.found)
+      console.error('  ' + d.file + ':' + d.line + '  ' + d.ref +
+                    '  —  ' + d.call + "('" + d.sel + "')");
+    console.error(NL + '  Ни в public/index.html, ни в разметке, собираемой из кода, такого нет.' +
+                  NL + '  Либо опечатка, либо остаток от удалённого куска интерфейса.');
+  } else {
+    console.log('ссылки на разметку: ' + dead.checked + ' проверено, все на месте' +
+                ' (' + known.ids.size + ' id, ' + known.classes.size + ' классов, ' +
+                known.attrs.size + ' data-атрибутов)');
+  }
+
   const entry = moduleFor(ENTRY);
   try {
     // связывание: именно здесь всплывает ввоз имени, которого сосед не вывозит
@@ -257,7 +342,42 @@ function linker(spec, referrer) {
     console.log('реестры на месте и наполнены: ' + PROBES.length + ' проверено');
   }
 
-  /* Второй проход: дёргаем собранные обработчики.
+  /* Второй проход: три экрана.
+
+     Загрузка модулей только развешивает обработчики — ни список досок, ни
+     вход, ни сама доска при этом не показываются, и весь код показа экрана
+     остаётся непройденным. А там-то и живут обращения к разметке: showView
+     обходит список из семи идентификаторов и каждый разыменовывает. Список
+     этот по тексту не проверить (идентификаторы лежат в массиве, а не доводом
+     вызова), заглушкой — можно, но только если до него дойти.
+
+     Заходим через nav: сначала ставим адрес, потом зовём — иначе route
+     прочитает старый путь и покажет не тот экран. */
+  const SCREENS = ['/login', '/board/probe', '/'];
+  const refErrors = [];
+  const app = loaded.get(path.join(JS_DIR, 'app.js'));
+  sandbox.__nav = app && app.namespace ? app.namespace.nav : null;
+  if (sandbox.__nav) {
+    for (const p of SCREENS) {
+      sandbox.location.pathname = p;
+      sandbox.location.search = '';
+      try {
+        vm.runInContext('__err = null; try { __nav(' + JSON.stringify(p) + '); } catch (e) { __err = e; }',
+                        sandbox, { timeout: 2000 });
+        const e = sandbox.__err;
+        if (e && e.constructor && e.constructor.name === 'ReferenceError')
+          refErrors.push(['экран ' + p, e.message, e]);
+      } catch { /* ушёл в бесконечный цикл на нулях — не наша забота */ }
+    }
+    await settle();
+    sandbox.location.pathname = '/';
+    console.log('экраны показаны: ' + SCREENS.length + ' (вход, доска, список досок)');
+  } else {
+    failed = true;
+    console.error(NL + 'app.js больше не вывозит nav — экраны не показать');
+  }
+
+  /* Третий проход: дёргаем собранные обработчики.
 
      Снимок списка обязателен: вызванный обработчик сам создаёт элементы и
      вешает на них свои (карточка доски, строка участника, поле формулы),
@@ -272,7 +392,6 @@ function linker(spec, referrer) {
   sandbox.__handlers = list;
   sandbox.__ev = stubNode('event');
   sandbox.__err = null;
-  const refErrors = [];
   let stuck = 0;
   for (let i = 0; i < list.length; i++) {
     try {
@@ -284,16 +403,44 @@ function linker(spec, referrer) {
         refErrors.push([list[i][0], e.message, e]);
     } catch { stuck++; }
   }
+  await settle();
   console.log('обработчиков вызвано: ' + list.length +
               (stuck ? ' (' + stuck + ' не уложились в таймаут — пропущены)' : '') +
               (refErrors.length ? '' : ', необъявленных имён среди них нет'));
   if (refErrors.length) {
     failed = true;
-    console.error(NL + 'НЕОБЪЯВЛЕННЫЕ ИМЕНА в обработчиках:');
+    console.error(NL + 'НЕОБЪЯВЛЕННЫЕ ИМЕНА (экраны и обработчики):');
     for (const [where, msg, e] of refErrors) {
       const line = String(e.stack || '').split(NL).find(l => l.includes('/js/'));
       console.error('  ' + where + ': ' + msg + (line ? '   ' + line.trim() : ''));
     }
   }
+  /* Отказы обещаний — то же сито, что и у обработчиков: интересен только
+     ReferenceError, всё прочее на заглушке ожидаемо (сервера нет, данных нет). */
+  await settle();
+  const refRejects = rejections.filter(e => e && e.constructor && e.constructor.name === 'ReferenceError');
+  if (refRejects.length) {
+    failed = true;
+    console.error(NL + 'НЕОБЪЯВЛЕННЫЕ ИМЕНА в асинхронном коде (' + refRejects.length + '):');
+    for (const e of refRejects) {
+      const at = String(e.stack || '').split(NL).find(l => l.includes('/js/'));
+      console.error('  ' + e.message + (at ? '   ' + at.trim() : ''));
+    }
+  } else if (rejections.length) {
+    console.log('отказов обещаний: ' + rejections.length + ' — все ожидаемые (сервера нет)');
+  }
+
+  /* Что заглушка не нашла в разметке за оба прохода. Найденное текстовой
+     проверкой не повторяем — это одно и то же, сказанное дважды. */
+  const seen = new Set(dead.found.filter(d => d.ref[0] === '#').map(d => d.ref.slice(1)));
+  const atRun = [...missingRefs].filter(([id]) => !seen.has(id));
+  if (atRun.length) {
+    failed = true;
+    console.error(NL + 'ПОИСК ЭЛЕМЕНТА, КОТОРОГО НЕТ В РАЗМЕТКЕ (' + atRun.length + '):');
+    for (const [id, at] of atRun) console.error('  #' + id + '   ' + at);
+    console.error(NL + '  Найдено на выполнении: идентификатор пришёл не строкой в вызове,' +
+                  NL + '  а из списка или переменной, поэтому по тексту его не видно.');
+  }
+
   process.exit(failed ? 1 : 0);
 })();

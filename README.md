@@ -51,6 +51,8 @@ public/js/*.js     клиент по частям: core, geometry, shapes, physi
                    boards, app
 scripts/load-test.js  нагрузка: N ботов в одной доске, замер потолка
 scripts/check-client.js  прогон клиента без браузера (npm run check)
+scripts/lib-import-writes.js  запись в ввезённое имя — ищется по тексту
+scripts/lib-dom-refs.js  ссылки на разметку, которой нет, — тоже по тексту
 data/boards/<id>/  содержимое доски: snap.json + log.ndjson
 data/files/<id>/   вставленные картинки, по каталогу на доску
 data/sessions/     сессии (зашифрованы AES-256-GCM)
