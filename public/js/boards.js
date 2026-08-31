@@ -1,6 +1,6 @@
 /* список досок, окно доступа, вкладка администратора */
 
-import { S, api, board } from './core.js';
+import { S, api } from './core.js';
 import { escapeHtml, hint } from './shell.js';
 import { net } from './net.js';
 import { copyLink, toClipboard } from './toolbar.js';
@@ -242,13 +242,13 @@ async function openSettings(id){
      Открытое из самой доски окно всегда показывало значения по умолчанию:
      «гостевая ссылка выключена», даже если она включена. Выглядело так, будто
      настройка не сохранилась, хотя на сервере она стояла. */
-  let board=myBoards.find(b=>b.id===id)||null;
+  let info=myBoards.find(b=>b.id===id)||null;
   try{
     const d=await api('/boards/'+id);
-    if(d&&d.board)board={id,title:d.board.title,
+    if(d&&d.board)info={id,title:d.board.title,
       guestAccess:d.board.guest_access,objectEditPolicy:d.board.object_edit_policy};
   }catch{ /* не ответил — покажем что есть, но об этом скажем ниже */ }
-  if(!board)board={id,title:document.getElementById('title').textContent,
+  if(!info)info={id,title:document.getElementById('title').textContent,
     guestAccess:'none',objectEditPolicy:'creator'};
   /* Список учеников есть только у того, кто вошёл под своей учётной записью
      МЦКО: он берётся из mcko-app под его же правами. Гостю по ссылке брать
@@ -293,9 +293,9 @@ async function openSettings(id){
   document.body.appendChild(m);
   const $=s=>m.querySelector(s);
   const err=t=>{$('#stErr').textContent=t||'';};
-  $('#stTitle').textContent=board.title;
-  $('#stGuest').value=board.guestAccess||'none';
-  $('#stPolicy').value=board.objectEditPolicy||'creator';
+  $('#stTitle').textContent=info.title;
+  $('#stGuest').value=info.guestAccess||'none';
+  $('#stPolicy').value=info.objectEditPolicy||'creator';
   $('#stLock').value=S.locked?'1':'0';
 
   /* Что ещё не применено. Раньше каждая правка уходила на сервер сразу, и было

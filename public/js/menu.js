@@ -4,10 +4,10 @@ import { GRID_MODES, GRID_NAMES, PAPER, S, board, items, recordUndo, redoStack, 
 import { ARC_TYPES, BACK_TYPES, BOX_TYPES, SELECTABLE, bboxOf, rotAround } from './geometry.js';
 import { paintItem } from './shapes.js';
 import { hint } from './shell.js';
-import { canEdit, mineOnly, newId, pathDraft, refreshSelBar, select, selectMany, selection, selectionBox, spaceDown, updateSelBar } from './selection.js';
-import { applyCursor, drawBoard, drawLive, hoverPt, resize, zoomAt } from './render.js';
+import { canEdit, mineOnly, newId, refreshSelBar, select, selectMany, selection, selectionBox, updateSelBar } from './selection.js';
+import { applyCursor, drawBoard, drawLive, resize, zoomAt } from './render.js';
 import { addItem, deflate, inflate, net, removeItem } from './net.js';
-import { abortDraft, commitPathDraft, resyncPanning, snapGeom } from './input.js';
+import { abortDraft, commitPathDraft, hoverPt, pathDraft, resyncPanning, setSpaceDown, snapGeom, spaceDown } from './input.js';
 import { pushUndo, redo, undo } from './undo.js';
 import { closeAllPopovers, duplicateSelected, popOpen, setTool, updatePenPanel } from './toolbar.js';
 import { nav } from './app.js';
@@ -337,7 +337,7 @@ addEventListener('keydown',e=>{
   // позиции), и сравнение с 'z'/'c' никогда не совпадало бы. e.code называет
   // клавишу по месту на клавиатуре и не зависит от раскладки вообще.
   const c=e.code;
-  if(c==='Space'&&!spaceDown){spaceDown=true;applyCursor();e.preventDefault();}
+  if(c==='Space'&&!spaceDown){setSpaceDown(true);applyCursor();e.preventDefault();}
   if((e.ctrlKey||e.metaKey)&&c==='KeyZ'){e.preventDefault();e.shiftKey?redo():undo();return;}
   if((e.ctrlKey||e.metaKey)&&c==='KeyY'){e.preventDefault();redo();return;}
   if((e.ctrlKey||e.metaKey)&&c==='KeyD'){e.preventDefault();duplicateSelected();return;}
@@ -379,7 +379,7 @@ addEventListener('keydown',e=>{
     if(S.tool==='physics')setTool('select');
   }
 });
-addEventListener('keyup',e=>{if(e.code==='Space'){spaceDown=false;applyCursor();}});
+addEventListener('keyup',e=>{if(e.code==='Space'){setSpaceDown(false);applyCursor();}});
 addEventListener('resize',()=>{resize();refreshSelBar();});
 
 }

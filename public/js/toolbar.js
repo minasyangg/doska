@@ -1,13 +1,13 @@
 /* панель инструментов, меню фигур, настройки пера */
 
-import { FILLS, GRID_MODES, GRID_NAMES, PAPER, PENS, S, STYLED, api, board, dpr, mkStroke, outlinePath, recordUndo, redoStack, stage, store } from './core.js';
+import { FILLS, GRID_MODES, GRID_NAMES, PAPER, PENS, S, STYLED, api, board, mkStroke, outlinePath, recordUndo, redoStack, stage, store } from './core.js';
 import { ARC_TYPES, BOX_TYPES, bboxOf } from './geometry.js';
 import { SHAPES, SHAPE_GROUPS, SHAPE_NAMES } from './shapes.js';
 import { fillPeersPop, hint } from './shell.js';
-import { marquee, newId, select, selectMany, selection } from './selection.js';
-import { applyCursor, camChanged, drawBoard, drawLive, zoomAt } from './render.js';
+import { newId, select, selectMany, selection } from './selection.js';
+import { applyCursor, camChanged, dpr, drawBoard, drawLive, zoomAt } from './render.js';
 import { addItem, deflate, net, removeItem } from './net.js';
-import { snapGeom, updatePhysicsPanel } from './input.js';
+import { clearMarquee, snapGeom, updatePhysicsPanel } from './input.js';
 import { pushUndo, redo, undo } from './undo.js';
 import { openSettings } from './boards.js';
 
@@ -339,7 +339,7 @@ function setTool(t){
   document.getElementById('arrowRow').classList.toggle('hidden',t!=='path');
   // скорость меняет толщину только у пера и маркера — у фигур её нет
   document.getElementById('sensRow').classList.toggle('hidden',t!=='pen'&&t!=='marker');
-  if(t!=='select'){select(null);marquee=null;}
+  if(t!=='select'){select(null);clearMarquee();}
   if(t==='pen'||t==='marker'){
     S.color=t==='marker'?S.markerColor:S.penColor;
     if(t==='marker'&&S.size<12){S.size=18;sizeEl.value=18;}
@@ -683,6 +683,6 @@ document.getElementById('selDel').onclick=()=>{
 
 /* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  closeAllPopovers, copyLink, drawPreview, duplicateSelected, popOpen, prev, renderInks,
-  setTool, toClipboard, updatePenPanel,
+  closeAllPopovers, copyLink, drawPreview, duplicateSelected, popOpen, renderInks, setTool,
+  toClipboard, updatePenPanel,
 };

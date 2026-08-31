@@ -44,8 +44,6 @@ const STYLED=new Set(['pen','marker','shape','path','text','arc']);
 const stage=document.getElementById('stage');
 const board=document.getElementById('board'), live=document.getElementById('live');
 const bctx=board.getContext('2d'), lctx=live.getContext('2d');
-let dpr=Math.min(devicePixelRatio||1,2.5);
-
 const GRID_MODES=['grid','dots','lines','none'];
 const GRID_NAMES={grid:'клетка',dots:'точки',lines:'линейка',none:'чистый лист'};
 
@@ -87,6 +85,14 @@ const S={tool:'pen',size:4,color:PENS[0],penColor:PENS[0],markerColor:MARKERS[0]
 let items=[];                       // всё содержимое доски (линии и картинки)
 const byId=new Map();
 let undoStack=[], redoStack=[];
+
+/* Полный сброс содержимого доски.
+
+   Нужен потому, что чистит доску не тот, кто ею владеет: команда
+   приходит по сети (вход на доску и «очистить всё»), а содержимое живёт
+   здесь. Присвоить ввезённому имени из сети нельзя — ввезённая привязка
+   доступна только для чтения, — поэтому владелец даёт функцию. */
+function resetContent(){ items=[]; byId.clear(); undoStack=[]; redoStack=[]; }
 /* Потолок истории отмен.
 
    Записи копились без всякой границы. Для стирания запись держит ЦЕЛЫЕ
@@ -200,7 +206,7 @@ export function __init() {
 
 /* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  FILLS, GRID_MODES, GRID_NAMES, PAPER, PENS, S, STYLED, api, bctx, board, byId, dpr, guestId,
+  FILLS, GRID_MODES, GRID_NAMES, PAPER, PENS, S, STYLED, api, bctx, board, byId, guestId,
   items, lctx, live, mkStroke, outlinePath, paintStroke, pushPoint, recordUndo, redoStack,
-  simPressure, stage, store, toScreen, toWorld, trace, undoStack,
+  resetContent, simPressure, stage, store, toScreen, toWorld, trace, undoStack,
 };

@@ -5,21 +5,17 @@ import { ARC_TYPES, BOX_TYPES, SELECTABLE, arcPt, arcSweep, bboxOf, rotAround } 
 import { graphAxisLabelPos, graphPointY } from './graph.js';
 import { hitTest } from './text.js';
 import { drawLive } from './render.js';
-import { updatePhysicsPanel } from './input.js';
+import { dragging, marquee, updatePhysicsPanel } from './input.js';
 
-let current=null,drawId=null,lastPt=null,lastT=0,pressure=0.45,lastPen=0;
-const pointers=new Map();
-let pinch=null,panning=null,spaceDown=false,erasing=null,erasedBatch=[];
-/* selection — что выделено (0, 1 или много объектов), selected — тот самый
-   единственный, если он один. Ручки поворота и растяжения показываются только
-   для одиночного выделения: у группы осмысленны перенос, удаление, копия и
-   смена стиля, а не ресайз общей рамки. */
 let selection=[];
-let selected=null,dragging=null,seqNo=0,shapeDraft=null,pathDraft=null,marquee=null;
-/* Начатая дуга: центр ставится нажатием, радиус и начальный угол берутся с
-   первым же движением, дальше палец обводит — как настоящим циркулем. */
-let arcDraft=null;
+let selected=null,seqNo=0;
 
+/* Снять выделение, ничего больше не трогая.
+
+   Не то же самое, что select(null): тот ещё и перерисовывает панель. При
+   входе на доску это лишнее — там всё равно следом всё отрисовывается
+   заново, а в едином файле в этом месте стояло именно голое присваивание. */
+function clearSelected(){ selected=null; }
 const newId=()=>(S.me?S.me.id:'x')+'-'+(++seqNo)+'-'+Date.now().toString(36).slice(-4);
 const localXY=e=>{const r=stage.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};};
 // Зеркало серверной проверки: владельца замок доски не касается, наблюдателю
@@ -214,8 +210,7 @@ export function __init() {
 
 /* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  angleAt, arcDraft, canEdit, current, dragging, drawId, erasedBatch, eraserR, erasing,
-  handleAt, handlesFor, inSelection, itemAt, itemsIn, lastPen, lastPt, lastT, localXY, marquee,
-  mineOnly, newId, panning, pathDraft, pinch, pointers, pressure, refreshSelBar, select,
-  selectMany, selected, selection, selectionBox, shapeDraft, spaceDown, updateSelBar,
+  angleAt, canEdit, clearSelected, eraserR, handleAt, handlesFor, inSelection, itemAt, itemsIn,
+  localXY, mineOnly, newId, refreshSelBar, select, selectMany, selected, selection,
+  selectionBox, updateSelBar,
 };

@@ -5,13 +5,30 @@ import { ARC_TYPES, BOX_TYPES, arcSweep, bboxOf, normAngle, rotAround } from './
 import { GRAPH_COLORS, GRAPH_HEADER_H, cloneProps, graphCompile, graphEval, nextPointLabel, zoomGraphAt } from './graph.js';
 import { hitTest } from './text.js';
 import { hint } from './shell.js';
-import { angleAt, arcDraft, canEdit, current, dragging, drawId, erasedBatch, eraserR, erasing, handleAt, inSelection, itemAt, itemsIn, lastPen, lastPt, lastT, localXY, marquee, mineOnly, newId, panning, pathDraft, pinch, pointers, pressure, refreshSelBar, select, selectMany, selected, selection, shapeDraft, spaceDown } from './selection.js';
-import { applyCursor, camChanged, drawBoard, drawLive, handleCursor, hoverHandleCursor, hoverPt, zoomAt } from './render.js';
+import { angleAt, canEdit, eraserR, handleAt, inSelection, itemAt, itemsIn, localXY, mineOnly, newId, refreshSelBar, select, selectMany, selected, selection } from './selection.js';
+import { applyCursor, camChanged, drawBoard, drawLive, handleCursor, zoomAt } from './render.js';
 import { addItem, deflate, net, removeItem } from './net.js';
 import { renderGraphExpressions, renderGraphParams } from './graph-ui.js';
 import { pushUndo } from './undo.js';
-import { prev, setTool } from './toolbar.js';
+import { setTool } from './toolbar.js';
 import { openMenu, withGroup } from './menu.js';
+
+let hoverPt=null;                                   // для кольца ластика
+
+let hoverHandleCursor=null;
+
+let current=null,drawId=null,lastPt=null,lastT=0,pressure=0.45,lastPen=0;
+const pointers=new Map();
+let pinch=null,panning=null,spaceDown=false,erasing=null,erasedBatch=[];
+/* selection — что выделено (0, 1 или много объектов), selected — тот самый
+   единственный, если он один. Ручки поворота и растяжения показываются только
+   для одиночного выделения: у группы осмысленны перенос, удаление, копия и
+   смена стиля, а не ресайз общей рамки. */
+let dragging=null,shapeDraft=null,pathDraft=null,marquee=null;
+/* Начатая дуга: центр ставится нажатием, радиус и начальный угол берутся с
+   первым же движением, дальше палец обводит — как настоящим циркулем. */
+let arcDraft=null;
+
 
 /* ═══════════════════ ввод ═══════════════════ */
 function startMove(w){
@@ -539,6 +556,15 @@ function updatePhysicsPanel(){
     document.getElementById('physMassVal').textContent=Math.round(p.mass*1000);
   }
 }
+
+/* Две мелочи для тех, кто меняет состояние жеста со стороны.
+
+   Рамку выделения сбрасывает ещё и смена инструмента (toolbar), а пробел
+   как временное панорамирование ловит обработчик клавиш (menu). Само
+   состояние живёт здесь, а присвоить ввезённое имя снаружи нельзя —
+   ввезённая привязка доступна только для чтения. */
+function clearMarquee(){ marquee=null; }
+function setSpaceDown(v){ spaceDown=!!v; }
 
 /* Развешивание обработчиков и прочее, что делается при загрузке.
 
@@ -1110,5 +1136,7 @@ document.getElementById('physMass').oninput=e=>{
 
 /* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  abortDraft, commitPathDraft, placeImage, resyncPanning, snapGeom, updatePhysicsPanel,
+  abortDraft, arcDraft, clearMarquee, commitPathDraft, current, dragging, hoverHandleCursor,
+  hoverPt, lastPt, marquee, panning, pathDraft, placeImage, resyncPanning, setSpaceDown,
+  shapeDraft, snapGeom, spaceDown, updatePhysicsPanel,
 };

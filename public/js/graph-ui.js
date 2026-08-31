@@ -3,10 +3,10 @@
 import { S, stage } from './core.js';
 import { GRAPH_COLORS, graphExprOk } from './graph.js';
 import { hint } from './shell.js';
-import { lastPt, localXY, newId, selected } from './selection.js';
-import { drawBoard, hoverPt } from './render.js';
+import { localXY, newId, selected } from './selection.js';
+import { drawBoard } from './render.js';
 import { net } from './net.js';
-import { placeImage } from './input.js';
+import { hoverPt, lastPt, placeImage } from './input.js';
 
 /* ── график: список формул ─────────────────────────────────────
    Настраивать до постановки нечего — правим уже стоящий на доске объект,

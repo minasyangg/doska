@@ -1,9 +1,9 @@
 /* WebSocket и (де)сериализация объектов */
 
-import { S, board, byId, items, mkStroke, redoStack, undoStack } from './core.js';
+import { S, board, byId, items, mkStroke, resetContent } from './core.js';
 import { bboxOf } from './geometry.js';
 import { applyRole, deniedScreen, hint, renderPeers, setConn, setTitle } from './shell.js';
-import { inSelection, refreshSelBar, select, selected, updateSelBar } from './selection.js';
+import { clearSelected, inSelection, refreshSelBar, select, updateSelBar } from './selection.js';
 import { cursors, drawBoard, drawLive, peerViews, peers, remoteLive } from './render.js';
 import { dropFromSelection } from './undo.js';
 import { applyZ } from './menu.js';
@@ -17,6 +17,10 @@ import { nav } from './app.js';
    как только сокет снова открылся. Различает эти два случая один флаг:
    boardLoaded ещё не true — значит это первый вход, а не переподключение. */
 let boardLoaded=false;
+
+// прелоадер гасит и переход на другую доску (app), а привязку ему
+// отсюда не присвоить — только через эту функцию
+function setBoardLoaded(v){ boardLoaded=!!v; }
 let boardLoaderTimer=null;
 const boardLoaderEl=document.getElementById('boardLoader');
 const boardLoaderText=document.getElementById('boardLoaderText');
@@ -75,7 +79,7 @@ const net={
         peers.clear();peerViews.clear();
         peers.set(m.you.id,{name:m.you.name+' (вы)',color:m.you.color,cap:m.you.cap});
         for(const p of m.peers)peers.set(p.id,{name:p.name,color:p.color,cap:p.cap});
-        items=[];byId.clear();undoStack=[];redoStack=[];selected=null;
+        resetContent();clearSelected();
         for(const it of m.items)addItem(inflate(it),true);
         setTitle(m.title);
         applyRole();renderPeers();drawBoard();
@@ -140,7 +144,7 @@ const net={
         }
         break;
       }
-      case 'cleared':items=[];byId.clear();undoStack=[];redoStack=[];select(null);drawBoard();hint('Доска очищена');break;
+      case 'cleared':resetContent();select(null);drawBoard();hint('Доска очищена');break;
       case 'lock':S.locked=m.on;applyRole();
         hint(m.on?'Преподаватель закрыл доску для рисования':'Рисование снова доступно');break;
       // права могли измениться посреди урока: владелец убрал участника или
@@ -302,5 +306,5 @@ setInterval(()=>{
 
 /* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  addItem, boardLoaded, deflate, inflate, net, removeItem, showBoardLoader,
+  addItem, deflate, inflate, net, removeItem, setBoardLoaded, showBoardLoader,
 };

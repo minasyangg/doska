@@ -38,6 +38,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const { pathToFileURL } = require('url');
+const { findImportWrites } = require('./lib-import-writes');
 
 const NL = String.fromCharCode(10);
 const JS_DIR = path.join(__dirname, '..', 'public', 'js');
@@ -166,6 +167,23 @@ function linker(spec, referrer) {
               ' строк');
 
   let failed = false;
+
+  /* Запись в ввезённое имя — проверяем ДО запуска и по тексту.
+     Именно этот класс ошибок сломал первый заход: связывание проходило,
+     загрузка проходила, а доска не открывалась, потому что присваивание
+     ввезённой привязке даёт TypeError, и сидят такие присваивания внутри
+     обработчиков. Подробности — в scripts/lib-import-writes.js. */
+  const writes = findImportWrites(JS_DIR);
+  if (writes.length) {
+    failed = true;
+    console.error(NL + 'ЗАПИСЬ В ВВЕЗЁННОЕ ИМЯ (' + writes.length + '):');
+    for (const w of writes)
+      console.error('  ' + w.file + ':' + w.line + '  ' + w.name + ' — ввезено из ' + w.from + ".js");
+    console.error(NL + '  Ввезённая привязка доступна только для чтения. Имя должно жить в том' +
+                  NL + '  модуле, который в него пишет, либо меняться через функцию этого модуля.');
+  } else {
+    console.log('записи в ввезённые имена: нет');
+  }
   const entry = moduleFor(ENTRY);
   try {
     // связывание: именно здесь всплывает ввоз имени, которого сосед не вывозит

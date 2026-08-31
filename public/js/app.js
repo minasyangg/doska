@@ -4,7 +4,7 @@ import { S, api, board, guestId, stage, store } from './core.js';
 import { HINT_DEFAULT, escapeHtml, hint } from './shell.js';
 import { select } from './selection.js';
 import { drawBoard, resize } from './render.js';
-import { boardLoaded, net, showBoardLoader } from './net.js';
+import { net, setBoardLoaded, showBoardLoader } from './net.js';
 import { closeAllPopovers, drawPreview, renderInks, setTool, updatePenPanel } from './toolbar.js';
 import { dash, grid, loadBoards, loginEl, renderWho } from './boards.js';
 
@@ -102,7 +102,7 @@ function nav(path){
 async function openBoard(id){
   if(S.boardId===id&&net.ws)return;
   net.close();                        // тоже снимет прелоадер — включаем его после
-  boardLoaded=false;showBoardLoader('Загружаю доску…');
+  setBoardLoaded(false);showBoardLoader('Загружаю доску…');
   S.boardId=id;S.cap='none';S.me=null;select(null);
   showView('board');
   resize();

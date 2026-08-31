@@ -1,11 +1,15 @@
 /* отрисовка холста, камера, курсоры участников */
 
-import { PAPER, S, bctx, board, dpr, items, lctx, live, outlinePath, stage, toScreen, toWorld } from './core.js';
+import { PAPER, S, bctx, board, items, lctx, live, outlinePath, stage, toScreen, toWorld } from './core.js';
 import { ARC_TYPES, BACK_TYPES, BOX_TYPES, arcPt, arcSweep, bboxOf } from './geometry.js';
 import { paintItem, paintPath, paintShape } from './shapes.js';
 import { paintArc, paintGraphCoordHint } from './graph.js';
-import { angleAt, arcDraft, canEdit, current, dragging, eraserR, handlesFor, marquee, panning, pathDraft, selected, selection, selectionBox, shapeDraft, spaceDown } from './selection.js';
+import { angleAt, canEdit, eraserR, handlesFor, selected, selection, selectionBox } from './selection.js';
 import { net } from './net.js';
+import { arcDraft, current, dragging, hoverHandleCursor, hoverPt, marquee, panning, pathDraft, shapeDraft, spaceDown } from './input.js';
+
+let dpr=Math.min(devicePixelRatio||1,2.5);
+
 
 /* ═══════════════════ отрисовка ═══════════════════ */
 function resize(){
@@ -77,8 +81,6 @@ const remoteLive=new Map(), cursors=new Map(), peers=new Map();
 // «участник смотрит в другой стороне», когда его поле зрения не совпадает
 // с нашим (см. flushLive)
 const peerViews=new Map();
-let hoverPt=null;                                   // для кольца ластика
-
 function flushLive(){
   if(!liveDirty)return; liveDirty=false;
   lctx.setTransform(1,0,0,1,0,0);
@@ -403,7 +405,6 @@ function applyCursor(){
     : (!canEdit() ? 'not-allowed'
     : (hoverHandleCursor || (CURSOR[S.tool]||'crosshair'))));
 }
-let hoverHandleCursor=null;
 
 /* Развешивание обработчиков и прочее, что делается при загрузке.
 
@@ -419,6 +420,6 @@ export function __init() {
 
 /* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  applyCursor, camChanged, cursors, drawBoard, drawLive, handleCursor, hoverHandleCursor,
-  hoverPt, peerViews, peers, remoteLive, resize, zoomAt,
+  applyCursor, camChanged, cursors, dpr, drawBoard, drawLive, handleCursor, peerViews, peers,
+  remoteLive, resize, zoomAt,
 };

@@ -4,8 +4,8 @@ import { S, toScreen, toWorld } from './core.js';
 import { arcSweep } from './geometry.js';
 import { drawAxisArrow } from './shapes.js';
 import { compassAngle, paintBody, paintCalorimeter, paintFieldLines, paintHeater, paintLens, paintMirror, paintSource } from './physics.js';
-import { dragging, itemAt } from './selection.js';
-import { hoverPt } from './render.js';
+import { itemAt } from './selection.js';
+import { dragging, hoverPt } from './input.js';
 
 /* ── график функций (раздел «Математика» в доп.меню) ─────────────
    Свой парсер и вычислитель вместо стороннего math.js/eval: доска —
