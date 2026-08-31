@@ -1,10 +1,11 @@
 /* вход и маршрутизация */
 
 import { S, api, board, guestId, stage, store } from './core.js';
+import { HINT_DEFAULT, escapeHtml, hint } from './shell.js';
+import { select } from './selection.js';
 import { drawBoard, resize } from './render.js';
 import { boardLoaded, net, showBoardLoader } from './net.js';
-import { select } from './input.js';
-import { HINT_DEFAULT, closeAllPopovers, drawPreview, escapeHtml, hint, renderInks, setTool, updatePenPanel } from './toolbar.js';
+import { closeAllPopovers, drawPreview, renderInks, setTool, updatePenPanel } from './toolbar.js';
 import { dash, grid, loadBoards, loginEl, renderWho } from './boards.js';
 
 /* ═══════════════════ вход ═══════════════════ */
@@ -206,17 +207,12 @@ async function route(){
   loadBoards();
 }
 
-
 /* Развешивание обработчиков и прочее, что делается при загрузке.
 
-   Вынесено из тела модуля нарочно. Модули здесь ссылаются друг на друга
-   кольцами (сеть ↔ интерфейс ↔ ввод), а при кольцах порядок выполнения
-   задаёт граф импортов, а не список в точке входа: тело toolbar.js
-   успевало выполниться раньше shapes.js и обращалось к его const до
-   инициализации. Объявления от порядка не страдают — функции подняты, а
-   их тела выполняются уже потом, — страдали только эти строки. Теперь их
-   зовёт main.js, в исходном порядке и уже после того, как все модули
-   вычислены. */
+   Вынесено из тела модуля нарочно. Модули ссылаются друг на друга кольцами,
+   а при кольцах порядок выполнения задаёт граф импортов, а не список в точке
+   входа. Теперь эти строки зовёт main.js — в исходном порядке и уже после
+   того, как все модули вычислены. */
 export function __init() {
 document.getElementById('loginForm').onsubmit=async e=>{
   e.preventDefault();

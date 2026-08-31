@@ -2,10 +2,10 @@
 
 import { S, board, byId, items, mkStroke, redoStack, undoStack } from './core.js';
 import { bboxOf } from './geometry.js';
+import { applyRole, deniedScreen, hint, renderPeers, setConn, setTitle } from './shell.js';
+import { inSelection, refreshSelBar, select, selected, updateSelBar } from './selection.js';
 import { cursors, drawBoard, drawLive, peerViews, peers, remoteLive } from './render.js';
-import { inSelection, refreshSelBar, select, selected, updateSelBar } from './input.js';
 import { dropFromSelection } from './undo.js';
-import { applyRole, deniedScreen, hint, renderPeers, setConn, setTitle } from './toolbar.js';
 import { applyZ } from './menu.js';
 import { nav } from './app.js';
 
@@ -287,14 +287,10 @@ function removeItem(id){
 
 /* Развешивание обработчиков и прочее, что делается при загрузке.
 
-   Вынесено из тела модуля нарочно. Модули здесь ссылаются друг на друга
-   кольцами (сеть ↔ интерфейс ↔ ввод), а при кольцах порядок выполнения
-   задаёт граф импортов, а не список в точке входа: тело toolbar.js
-   успевало выполниться раньше shapes.js и обращалось к его const до
-   инициализации. Объявления от порядка не страдают — функции подняты, а
-   их тела выполняются уже потом, — страдали только эти строки. Теперь их
-   зовёт main.js, в исходном порядке и уже после того, как все модули
-   вычислены. */
+   Вынесено из тела модуля нарочно. Модули ссылаются друг на друга кольцами,
+   а при кольцах порядок выполнения задаёт граф импортов, а не список в точке
+   входа. Теперь эти строки зовёт main.js — в исходном порядке и уже после
+   того, как все модули вычислены. */
 export function __init() {
 setInterval(()=>{
   const n=performance.now();let ch=false;

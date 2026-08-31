@@ -2,10 +2,11 @@
 
 import { S, stage } from './core.js';
 import { GRAPH_COLORS, graphExprOk } from './graph.js';
+import { hint } from './shell.js';
+import { lastPt, localXY, newId, selected } from './selection.js';
 import { drawBoard, hoverPt } from './render.js';
 import { net } from './net.js';
-import { lastPt, localXY, newId, placeImage, selected } from './input.js';
-import { hint } from './toolbar.js';
+import { placeImage } from './input.js';
 
 /* ── график: список формул ─────────────────────────────────────
    Настраивать до постановки нечего — правим уже стоящий на доске объект,
@@ -108,14 +109,10 @@ function renderGraphParams(){
 
 /* Развешивание обработчиков и прочее, что делается при загрузке.
 
-   Вынесено из тела модуля нарочно. Модули здесь ссылаются друг на друга
-   кольцами (сеть ↔ интерфейс ↔ ввод), а при кольцах порядок выполнения
-   задаёт граф импортов, а не список в точке входа: тело toolbar.js
-   успевало выполниться раньше shapes.js и обращалось к его const до
-   инициализации. Объявления от порядка не страдают — функции подняты, а
-   их тела выполняются уже потом, — страдали только эти строки. Теперь их
-   зовёт main.js, в исходном порядке и уже после того, как все модули
-   вычислены. */
+   Вынесено из тела модуля нарочно. Модули ссылаются друг на друга кольцами,
+   а при кольцах порядок выполнения задаёт граф импортов, а не список в точке
+   входа. Теперь эти строки зовёт main.js — в исходном порядке и уже после
+   того, как все модули вычислены. */
 export function __init() {
 document.getElementById('physGraphAdd').onclick=()=>{
   const it=activeGraphItem();

@@ -3,11 +3,13 @@
 import { GRID_MODES, GRID_NAMES, PAPER, S, board, items, recordUndo, redoStack, store, toWorld } from './core.js';
 import { ARC_TYPES, BACK_TYPES, BOX_TYPES, SELECTABLE, bboxOf, rotAround } from './geometry.js';
 import { paintItem } from './shapes.js';
+import { hint } from './shell.js';
+import { canEdit, mineOnly, newId, pathDraft, refreshSelBar, select, selectMany, selection, selectionBox, spaceDown, updateSelBar } from './selection.js';
 import { applyCursor, drawBoard, drawLive, hoverPt, resize, zoomAt } from './render.js';
 import { addItem, deflate, inflate, net, removeItem } from './net.js';
-import { abortDraft, canEdit, commitPathDraft, mineOnly, newId, pathDraft, refreshSelBar, resyncPanning, select, selectMany, selection, selectionBox, snapGeom, spaceDown, updateSelBar } from './input.js';
+import { abortDraft, commitPathDraft, resyncPanning, snapGeom } from './input.js';
 import { pushUndo, redo, undo } from './undo.js';
-import { closeAllPopovers, duplicateSelected, hint, popOpen, setTool, updatePenPanel } from './toolbar.js';
+import { closeAllPopovers, duplicateSelected, popOpen, setTool, updatePenPanel } from './toolbar.js';
 import { nav } from './app.js';
 
 /* ═══════════════════ группы, слои, буфер ═══════════════════ */
@@ -278,17 +280,12 @@ function setGrid(mode){
   hint('Фон: '+GRID_NAMES[mode]);drawBoard();
 }
 
-
 /* Развешивание обработчиков и прочее, что делается при загрузке.
 
-   Вынесено из тела модуля нарочно. Модули здесь ссылаются друг на друга
-   кольцами (сеть ↔ интерфейс ↔ ввод), а при кольцах порядок выполнения
-   задаёт граф импортов, а не список в точке входа: тело toolbar.js
-   успевало выполниться раньше shapes.js и обращалось к его const до
-   инициализации. Объявления от порядка не страдают — функции подняты, а
-   их тела выполняются уже потом, — страдали только эти строки. Теперь их
-   зовёт main.js, в исходном порядке и уже после того, как все модули
-   вычислены. */
+   Вынесено из тела модуля нарочно. Модули ссылаются друг на друга кольцами,
+   а при кольцах порядок выполнения задаёт граф импортов, а не список в точке
+   входа. Теперь эти строки зовёт main.js — в исходном порядке и уже после
+   того, как все модули вычислены. */
 export function __init() {
 addEventListener('pointerdown',e=>{
   if(menuEl.classList.contains('show')&&!menuEl.contains(e.target))closeMenu();

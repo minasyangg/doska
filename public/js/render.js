@@ -4,8 +4,8 @@ import { PAPER, S, bctx, board, dpr, items, lctx, live, outlinePath, stage, toSc
 import { ARC_TYPES, BACK_TYPES, BOX_TYPES, arcPt, arcSweep, bboxOf } from './geometry.js';
 import { paintItem, paintPath, paintShape } from './shapes.js';
 import { paintArc, paintGraphCoordHint } from './graph.js';
+import { angleAt, arcDraft, canEdit, current, dragging, eraserR, handlesFor, marquee, panning, pathDraft, selected, selection, selectionBox, shapeDraft, spaceDown } from './selection.js';
 import { net } from './net.js';
-import { angleAt, arcDraft, canEdit, current, dragging, eraserR, handlesFor, marquee, panning, pathDraft, selected, selection, selectionBox, shapeDraft, spaceDown } from './input.js';
 
 /* ═══════════════════ отрисовка ═══════════════════ */
 function resize(){
@@ -405,17 +405,12 @@ function applyCursor(){
 }
 let hoverHandleCursor=null;
 
-
 /* Развешивание обработчиков и прочее, что делается при загрузке.
 
-   Вынесено из тела модуля нарочно. Модули здесь ссылаются друг на друга
-   кольцами (сеть ↔ интерфейс ↔ ввод), а при кольцах порядок выполнения
-   задаёт граф импортов, а не список в точке входа: тело toolbar.js
-   успевало выполниться раньше shapes.js и обращалось к его const до
-   инициализации. Объявления от порядка не страдают — функции подняты, а
-   их тела выполняются уже потом, — страдали только эти строки. Теперь их
-   зовёт main.js, в исходном порядке и уже после того, как все модули
-   вычислены. */
+   Вынесено из тела модуля нарочно. Модули ссылаются друг на друга кольцами,
+   а при кольцах порядок выполнения задаёт граф импортов, а не список в точке
+   входа. Теперь эти строки зовёт main.js — в исходном порядке и уже после
+   того, как все модули вычислены. */
 export function __init() {
 (function loop(){flushBoard();flushLive();requestAnimationFrame(loop);})();
 
