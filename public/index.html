@@ -604,6 +604,22 @@
      редкие действия (сохранить картинкой и т.п.), которым не место в ряду
      значков — там и так уже тесно. -->
 <div class="pop card hidden" id="peersPop"></div>
+<!-- «Доступ»: тут же и общий замок.
+
+     Отдельной кнопкой на верхней панели он когда-то был, потом уехал в окно
+     настроек — и там оказался не к месту: запрет рисовать нужен посреди
+     объяснения, а не в окне, которое открывают раз на доску. Теперь он рядом
+     с тем, кого на доску пускают: одно нажатие ключика, и вот он. -->
+<div class="pop card hidden" id="accessPop">
+  <button class="mini" id="lockAll" title="Запретить рисовать всем, кроме преподавателя — включая гостей по ссылке" style="background:var(--panel-2);width:100%;display:flex;align-items:center;justify-content:flex-start;gap:8px">
+    <svg id="lockAllIcon" viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round"></svg>
+    <span id="lockAllText">Запретить рисовать всем</span>
+  </button>
+  <button class="mini" id="whoBtn" title="Кого пускать на доску" style="background:var(--panel-2);width:100%;display:flex;align-items:center;justify-content:flex-start;gap:8px;margin-top:6px">
+    <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><path d="M17 8h4M19 6v4"/></svg>
+    Кого пускать на доску
+  </button>
+</div>
 <div class="pop card hidden" id="linkPop">
   <div class="label" style="margin-bottom:6px">Ссылка ученику</div>
   <input id="linkVal" readonly>

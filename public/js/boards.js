@@ -246,10 +246,10 @@ async function openSettings(id){
   try{
     const d=await api('/boards/'+id);
     if(d&&d.board)info={id,title:d.board.title,
-      guestAccess:d.board.guest_access,objectEditPolicy:d.board.object_edit_policy};
+      guestAccess:d.board.guest_access};
   }catch{ /* не ответил — покажем что есть, но об этом скажем ниже */ }
   if(!info)info={id,title:document.getElementById('title').textContent,
-    guestAccess:'none',objectEditPolicy:'creator'};
+    guestAccess:'none'};
   /* Список учеников есть только у того, кто вошёл под своей учётной записью
      МЦКО: он берётся из mcko-app под его же правами. Гостю по ссылке брать
      его неоткуда и незачем — ему остаётся доступ по ссылке. */
@@ -267,24 +267,12 @@ async function openSettings(id){
         '<p style="color:#8C9199;font-size:12.5px;margin:0 0 4px">'+
         'Список учеников доступен после входа через МЦКО. Сейчас доской можно '+
         'поделиться только ссылкой.</p>')+
-    // Общий замок: он один умеет останавливать и гостей по ссылке, у которых
-    // нет строки участника и, значит, нет своего списка.
-    '<div class="sub">Рисование на доске</div>'+
-    '<div class="row"><select id="stLock" style="flex:1">'+
-      '<option value="0">разрешено всем, кому дали доступ</option>'+
-      '<option value="1">запрещено — рисует только преподаватель</option>'+
-    '</select></div>'+
     '<div class="sub">Гостевая ссылка</div>'+
     '<div class="row"><select id="stGuest" style="flex:1">'+
       '<option value="none">выключена — только по аккаунту</option>'+
       '<option value="view">по ссылке можно смотреть</option>'+
       '<option value="edit">по ссылке можно рисовать</option>'+
     '</select><button class="mini" id="stCopy" style="background:#fff;color:#15171A">Копировать</button></div>'+
-    '<div class="sub">Удаление объектов</div>'+
-    '<div class="row"><select id="stPolicy" style="flex:1">'+
-      '<option value="creator">каждый удаляет только своё</option>'+
-      '<option value="anyone">любой участник удаляет любое</option>'+
-    '</select></div>'+
     // Кнопка появляется, только когда есть что применять: пустое «Сохранить»
     // сбивает с толку — непонятно, сохранилось ли уже.
     '<button class="btn" id="stSave" hidden>Сохранить</button>'+
@@ -295,8 +283,6 @@ async function openSettings(id){
   const err=t=>{$('#stErr').textContent=t||'';};
   $('#stTitle').textContent=info.title;
   $('#stGuest').value=info.guestAccess||'none';
-  $('#stPolicy').value=info.objectEditPolicy||'creator';
-  $('#stLock').value=S.locked?'1':'0';
 
   /* Что ещё не применено. Раньше каждая правка уходила на сервер сразу, и было
      не видно, где заканчивается настройка: человек закрывал окно, не зная,
@@ -382,15 +368,11 @@ async function openSettings(id){
   const patch=async(body,onOk)=>{
     try{const d=await api('/boards/'+id,{method:'PATCH',body});
         const b=myBoards.find(x=>x.id===id);
-        if(b&&d.board){b.guestAccess=d.board.guest_access;b.objectEditPolicy=d.board.object_edit_policy;}
+        if(b&&d.board)b.guestAccess=d.board.guest_access;
         err('');if(onOk)onOk();}
     catch(e){err(e.message);}
   };
-  // Замок идёт не через общий PATCH, а тем же сообщением, что и раньше: его
-  // должны немедленно увидеть все, кто сейчас на доске.
-  $('#stLock').onchange=()=>{pending.lock=$('#stLock').value==='1';sync();};
   $('#stGuest').onchange=()=>{pending.board.guest_access=$('#stGuest').value;sync();};
-  $('#stPolicy').onchange=()=>{pending.board.object_edit_policy=$('#stPolicy').value;sync();};
 
   /* Применение разом. Порядок важен: сперва убираем, потом добавляем — иначе
      повторное добавление того, кого убирали, могло бы упереться в уникальность
@@ -409,11 +391,10 @@ async function openSettings(id){
       if(Object.keys(pending.board).length){
         const d=await api('/boards/'+id,{method:'PATCH',body:pending.board});
         const b=myBoards.find(x=>x.id===id);
-        if(b&&d.board){b.guestAccess=d.board.guest_access;b.objectEditPolicy=d.board.object_edit_policy;}
+        if(b&&d.board)b.guestAccess=d.board.guest_access;
       }
 
-      if(pending.lock!==null&&pending.lock!==S.locked)net.send({t:'lock',on:pending.lock});
-      pending.board={};pending.add=[];pending.drop=[];pending.access={};pending.lock=null;
+      pending.board={};pending.add=[];pending.drop=[];pending.access={};
       sync();err('');
       hint('Изменения сохранены');
       // Полотно берёт права в момент подключения, поэтому переподключаем его:

@@ -153,7 +153,17 @@ function record(r, op) {
 /** Метаданные из БД перекрывают файловый кэш — источник правды один. */
 function applyMeta(r, row) {
   if (!row) return r;
-  const anyEdit = row.object_edit_policy === 'anyone';
+  /* Кто может стирать чужое — больше не настройка, а правило: участник
+     удаляет только своё, преподаватель — что угодно и всегда (см. mine() в
+     обработчике сообщений: owner там стоит первым).
+
+     Настройка была, и она путала. «Любой участник удаляет любое» звучит
+     безобидно, пока на доске двое, а на группе означает, что чужую работу
+     сотрут по неосторожности и без следа — отменить чужое стирание у себя
+     нельзя. Столбец в базе остаётся (её мы не ломаем), но значения его
+     больше не читаем: правило одно для всех досок, включая заведённые
+     раньше с «любой удаляет любое». */
+  const anyEdit = false;
   if (r.title !== row.title || r.ownerId !== row.owner_id ||
       r.locked !== !!row.locked || r.anyEdit !== anyEdit) {
     r.title = row.title; r.ownerId = row.owner_id;
@@ -460,8 +470,6 @@ async function handleBoards(req, res, url, p) {
       if ('locked' in b) patch.locked = !!b.locked;
       if ('guest_access' in b && ['none', 'view', 'edit'].includes(b.guest_access))
         patch.guest_access = b.guest_access;
-      if ('object_edit_policy' in b && ['creator', 'anyone'].includes(b.object_edit_policy))
-        patch.object_edit_policy = b.object_edit_policy;
       if (!Object.keys(patch).length) return reply(res, 400, { error: 'нечего менять' });
 
       const row = await db.patchBoard(token, id, patch);
@@ -470,7 +478,6 @@ async function handleBoards(req, res, url, p) {
       cap_.invalidate(id);
       if ('title' in patch) broadcast(r, { t: 'title', title: r.title });
       if ('locked' in patch) broadcast(r, { t: 'lock', on: r.locked });
-      if ('object_edit_policy' in patch) broadcast(r, { t: 'policy', anyEdit: r.anyEdit });
       if (patch.guest_access === 'none') await db.dropGuestLink(token, id).catch(() => {});
       return reply(res, 200, { board: row });
     }

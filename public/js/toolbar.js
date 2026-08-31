@@ -413,10 +413,25 @@ async function copyLink(id,label){
 
 /* Списки панели: открыт может быть только один, щелчок мимо закрывает оба. */
 const peersPop=document.getElementById('peersPop'), linkPop=document.getElementById('linkPop');
-const topMorePop=document.getElementById('topMorePop');
+const topMorePop=document.getElementById('topMorePop'), accessPop=document.getElementById('accessPop');
+
+/* Замок нарисован по состоянию, а не переключателем: подпись прямо говорит,
+   что произойдёт по нажатию, а не в каком положении рычажок. «Разрешить» на
+   закрытой доске понятнее, чем галочка, которую надо ещё истолковать. */
+const LOCK_SHUT_ICON='<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/>';
+const LOCK_OPEN_ICON='<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 7.5-1.9"/>';
+function fillAccessPop(){
+  const shut=!!S.locked;
+  document.getElementById('lockAllIcon').innerHTML=shut?LOCK_OPEN_ICON:LOCK_SHUT_ICON;
+  document.getElementById('lockAllText').textContent=shut?'Разрешить рисовать всем':'Запретить рисовать всем';
+  document.getElementById('lockAll').title=shut
+    ? 'Сейчас рисует только преподаватель. Вернуть рисование всем, кому дали доступ'
+    : 'Запретить рисовать всем, кроме преподавателя — включая гостей по ссылке';
+}
 function popOpen(el){
-  for(const p of [peersPop,linkPop,topMorePop])p.classList.toggle('hidden',p!==el||!el);
+  for(const p of [peersPop,linkPop,topMorePop,accessPop])p.classList.toggle('hidden',p!==el||!el);
   if(el===peersPop)fillPeersPop();
+  if(el===accessPop)fillAccessPop();
   if(el===linkPop){
     document.getElementById('linkVal').value=location.origin+'/board/'+S.boardId;
   }
@@ -657,12 +672,23 @@ document.getElementById('linkCopy').onclick=()=>{
   const inp=document.getElementById('linkVal');inp.select();
 };
 addEventListener('pointerdown',e=>{
-  if(peersPop.classList.contains('hidden')&&linkPop.classList.contains('hidden')&&topMorePop.classList.contains('hidden'))return;
-  if(peersPop.contains(e.target)||linkPop.contains(e.target)||topMorePop.contains(e.target))return;
-  if(e.target.closest&&e.target.closest('#peersBtn,#copy,#topMoreBtn'))return;
+  const pops=[peersPop,linkPop,topMorePop,accessPop];
+  if(pops.every(p=>p.classList.contains('hidden')))return;
+  if(pops.some(p=>p.contains(e.target)))return;
+  if(e.target.closest&&e.target.closest('#peersBtn,#copy,#topMoreBtn,#gear'))return;
   popOpen(null);
 },true);
-document.getElementById('gear').onclick=()=>openSettings(S.boardId);
+// Ключик больше не открывает окно настроек сразу: под ним два действия —
+// быстрый запрет рисовать и собственно «кого пускать на доску».
+document.getElementById('gear').onclick=()=>
+  popOpen(accessPop.classList.contains('hidden')?accessPop:null);
+document.getElementById('lockAll').onclick=()=>{
+  // тем же сообщением, что и раньше: замок должны немедленно увидеть все, кто
+  // сейчас на доске, а не после сохранения окна
+  net.send({t:'lock',on:!S.locked});
+  popOpen(null);
+};
+document.getElementById('whoBtn').onclick=()=>{popOpen(null);openSettings(S.boardId);};
 document.getElementById('title').onclick=async()=>{
   if(S.cap!=='owner')return;
   const t=prompt('Название доски:',document.getElementById('title').textContent);
