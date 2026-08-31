@@ -1,52 +1,52 @@
 /* ============================================================
    Прогон клиента без браузера.
 
-   Зачем. Клиент — один файл на шесть с половиной тысяч строк, и
-   автоматических проверок у него нет вообще. Пока он лежит одним куском, это
-   терпимо: ошибка вылезает при первом же открытии доски. Но как только его
-   режут на модули, появляется целый класс ошибок, которых раньше быть не
-   могло, — имя, объявленное в одном файле и использованное в другом без
-   импорта. Такое не ловится ни node --check, ни глазами: страница просто
-   падает на загрузке, и хорошо ещё, если сразу, а не на редкой ветке вроде
-   вкладки администратора.
+   Зачем. Автоматических проверок у клиента нет. Пока он лежал одним куском,
+   это было терпимо: ошибка вылезала при первом же открытии доски. После
+   разделения на модули появился класс ошибок, которого раньше быть не могло, —
+   имя, объявленное в одном файле и использованное в другом без импорта. Такое
+   не ловится ни node --check, ни глазами: страница просто не загружается, и
+   хорошо ещё, если сразу, а не на редкой ветке вроде вкладки администратора.
 
-   Что делает. Достаёт содержимое <script> из index.html и выполняет его в
-   Node на заглушке браузера — в СТРОГОМ режиме. Дальше падение говорит само
-   за себя: обращение к необъявленному имени, присваивание необъявленному
-   (в обычном режиме молча заводило глобальную, в строгом — ошибка), опечатка
-   в имени функции.
+   Что делает. Собирает граф модулей из public/js настоящим загрузчиком
+   (vm.SourceTextModule), выполняет его на заглушке браузера и вторым проходом
+   дёргает все развешенные обработчики.
 
-   Вторым проходом дёргаются сами обработчики. Развешивая их, заглушка не
-   выбрасывает их, а запоминает, и потом каждый зовётся с поддельным событием.
-   Так под проверку попадает и то, что иначе выполнилось бы только по нажатию.
-   Считаются при этом ТОЛЬКО ошибки вида ReferenceError: всё прочее, что
-   вылезает при вызове обработчика на заглушке, — это отсутствующее состояние
-   доски, а не дефект кода, и шуметь про него бессмысленно.
+   Почему настоящий загрузчик, а не склейка файлов. Склейка проверила бы, что
+   код выполняется, но не проверила бы сами импорты: ввоз имени, которого сосед
+   не вывозит, — это ошибка связывания, и её ловит только линкер. Он же
+   сообщает о ней ДО выполнения, точным сообщением, а не падением где-то в
+   середине.
 
-   Чего он НЕ проверяет, и это важно понимать. Ветки внутри обработчиков,
-   куда поддельное событие не заводит (проверки вида «если выделено больше
-   одного»), остаются непройденными. Это не замена ручной проверке, это сито
-   на один, зато самый частый и самый разрушительный класс ошибок.
+   Учитывается ТОЛЬКО ошибка вида ReferenceError: всё прочее, что вылезает при
+   вызове обработчика на заглушке, — это отсутствующее состояние доски, а не
+   дефект кода, и шуметь про него бессмысленно.
+
+   Чего он НЕ проверяет. Ветки внутри обработчиков, куда поддельное событие не
+   заводит («если выделено больше одного»), остаются непройденными. Это не
+   замена ручной проверке, это сито на один, зато самый разрушительный класс
+   ошибок.
 
    Заглушка нарочно всеядная: любое свойство отдаёт объект, который можно и
    позвать, и сложить, и сравнить. Она не изображает браузер, она лишь не
    мешает коду доработать до конца.
 
-   Запуск:  node scripts/check-client.js
+   Запуск:  npm run check
    ============================================================ */
 'use strict';
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const { pathToFileURL } = require('url');
 
 const NL = String.fromCharCode(10);
-const FILE = path.join(__dirname, '..', 'public', 'index.html');
+const JS_DIR = path.join(__dirname, '..', 'public', 'js');
+const ENTRY = path.join(JS_DIR, 'main.js');
 
 /* ── заглушка браузера ────────────────────────────────────────
    Один универсальный узел на всё: элемент, контекст холста, список узлов.
    Возвращает сам себя на любое обращение, поэтому цепочки любой длины
    (document.getElementById('x').classList.toggle(...)) проходят насквозь. */
-/* Обработчики не выбрасываем, а собираем: второй проход их вызовет. */
 const handlers = [];
 const isHandlerKey = k => typeof k === 'string' && k.startsWith('on') && k.length > 2;
 
@@ -98,12 +98,11 @@ function stubNode(name, depth) {
   });
 }
 
-const doc = stubNode('document');
 const storage = { getItem: () => null, setItem() {}, removeItem() {} };
 
 const sandbox = {
   console,
-  document: doc,
+  document: stubNode('document'),
   localStorage: storage, sessionStorage: storage,
   location: { protocol: 'https:', host: 'tutpad.ru', hostname: 'tutpad.ru',
               pathname: '/', search: '', hash: '', href: 'https://tutpad.ru/' },
@@ -113,7 +112,7 @@ const sandbox = {
   devicePixelRatio: 2,
   innerWidth: 1280, innerHeight: 720,
   crypto: { getRandomValues: a => a, randomUUID: () => 'x' },
-  // таймеры и кадры глушим: скрипт вешает несколько интервалов, и живыми они
+  // таймеры и кадры глушим: клиент вешает несколько интервалов, и живыми они
   // здесь только помешали бы процессу завершиться
   setTimeout: () => 0, setInterval: () => 0, clearTimeout() {}, clearInterval() {},
   requestAnimationFrame: () => 0, cancelAnimationFrame() {},
@@ -135,81 +134,143 @@ const sandbox = {
 sandbox.window = sandbox;
 sandbox.globalThis = sandbox;
 sandbox.self = sandbox;
+vm.createContext(sandbox);
 
-/* ── сам прогон ──────────────────────────────────────────── */
-function scriptsOf(html) {
-  const out = [];
-  const re = /<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g;
-  let m;
-  while ((m = re.exec(html))) out.push(m[1]);
-  return out;
+/* ── сборка графа модулей ─────────────────────────────────── */
+const loaded = new Map();
+function moduleFor(file) {
+  const key = path.resolve(file);
+  if (loaded.has(key)) return loaded.get(key);
+  const src = fs.readFileSync(key, 'utf8');
+  const m = new vm.SourceTextModule(src, {
+    identifier: pathToFileURL(key).href,
+    context: sandbox,
+    initializeImportMeta(meta) { meta.url = pathToFileURL(key).href; },
+  });
+  loaded.set(key, m);
+  return m;
+}
+function linker(spec, referrer) {
+  const from = path.dirname(new URL(referrer.identifier).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+  return moduleFor(path.resolve(from, spec));
 }
 
-const html = fs.readFileSync(FILE, 'utf8');
-const parts = scriptsOf(html);
-if (!parts.length) { console.error('в index.html не нашлось ни одного <script> с кодом'); process.exit(1); }
+(async () => {
+  if (!fs.existsSync(ENTRY)) {
+    console.error('нет ' + ENTRY + ' — клиент ещё не разделён на модули?');
+    process.exit(1);
+  }
+  const files = fs.readdirSync(JS_DIR).filter(f => f.endsWith('.js'));
+  console.log('public/js: ' + files.length + ' модулей, ' +
+              files.reduce((n, f) => n + fs.readFileSync(path.join(JS_DIR, f), 'utf8').split(NL).length, 0) +
+              ' строк');
 
-const js = parts.join('\n');
-console.log('index.html: ' + parts.length + ' блок(ов) <script>, ' + js.split('\n').length + ' строк');
+  let failed = false;
+  const entry = moduleFor(ENTRY);
+  try {
+    // связывание: именно здесь всплывает ввоз имени, которого сосед не вывозит
+    await entry.link(linker);
+    console.log('связывание прошло: все импорты нашли свои экспорты');
+  } catch (e) {
+    console.error(NL + 'ОШИБКА СВЯЗЫВАНИЯ: ' + e.message);
+    process.exit(1);
+  }
+  try {
+    await entry.evaluate({ timeout: 30000 });
+    console.log('загрузка прошла: необъявленных имён нет');
+  } catch (e) {
+    failed = true;
+    console.error(NL + 'ОШИБКА при загрузке клиента:');
+    console.error('  ' + e.name + ': ' + e.message);
+    const line = String(e.stack || '').split(NL).find(l => l.includes('/js/'));
+    if (line) console.error('  ' + line.trim());
+    if (e instanceof ReferenceError)
+      console.error(NL + '  Похоже на имя, которое объявлено в другом модуле, но сюда не ввезено.');
+    process.exit(1);
+  }
 
-vm.createContext(sandbox);
-let failed = false;
-try {
-  // строгий режим — то же, что включат ES-модули; здесь он и проверяется
-  vm.runInContext("'use strict';\n" + js, sandbox, { filename: 'index.html<script>', timeout: 20000 });
-  console.log('загрузка прошла: строгий режим выдержан, необъявленных имён нет');
+  /* Дымовая проверка: «загрузилось» и «загрузилось правильно» — разные вещи.
 
-  /* Второй проход: дёргаем собранные обработчики. Событие поддельное и
-     всеядное — задача не изобразить нажатие, а дать коду дойти до тех строк,
-     которые при загрузке не выполняются.
+     Модули ссылаются друг на друга кольцами, и при кольцах реестр может
+     оказаться пустым, а не отсутствующим: имя есть, ошибки нет, просто данные
+     не успели попасть на место. Поэтому проверяем не наличие имён, а
+     наполненность самых крупных реестров — тех, из которых собирается
+     интерфейс и разбираются присланные объекты. Пустой SHAPES означает доску
+     без фигур, пустой PATCHABLE — что чужие правки не применяются.  */
+  /* Размер считаем без instanceof: реестры созданы внутри контекста vm, у
+     которого свои Set и Map, и проверка на принадлежность через границу
+     контекста не срабатывает — Set с четырьмя элементами выглядел бы пустым
+     объектом. Смотрим на утиный признак: есть числовое .size или .length. */
+  const size = v => !v ? -1
+                  : typeof v.size === 'number' ? v.size
+                  : typeof v.length === 'number' ? v.length
+                  : typeof v === 'object' ? Object.keys(v).length : -1;
+  const PROBES = [
+    ['shapes.js',  'SHAPES',      'каталог фигур'],
+    ['shapes.js',  'SHAPE_GROUPS','разделы каталога фигур'],
+    ['geometry.js','BOX_TYPES',   'типы с рамкой'],
+    ['geometry.js','SELECTABLE',  'выделяемые типы'],
+    ['net.js',     'PATCHABLE',   'какие поля принимает move'],
+    ['net.js',     'DEFLATE',     'сериализация по типам'],
+    ['net.js',     'INFLATE',     'разбор по типам'],
+    ['toolbar.js', 'EXTRA_TOOLS', 'дополнительные инструменты'],
+    ['menu.js',    'MENU_ICONS',  'значки меню'],
+    ['graph.js',   'GRAPH_FUNCS', 'функции графика'],
+    ['physics.js', 'MATERIALS',   'вещества'],
+    ['core.js',    'PENS',        'цвета пера'],
+  ];
+  const empty = [];
+  for (const [file, name, what] of PROBES) {
+    const mod = loaded.get(path.join(JS_DIR, file));
+    const v = mod && mod.namespace ? mod.namespace[name] : undefined;
+    if (v === undefined) empty.push(name + ' (' + what + '): нет такого вывоза в ' + file);
+    else if (size(v) <= 0) empty.push(name + ' (' + what + '): пусто');
+  }
+  if (empty.length) {
+    failed = true;
+    console.error(NL + 'РЕЕСТРЫ ПУСТЫ ИЛИ ОТСУТСТВУЮТ:');
+    for (const e of empty) console.error('  ' + e);
+  } else {
+    console.log('реестры на месте и наполнены: ' + PROBES.length + ' проверено');
+  }
 
-     Каждый вызов идёт через vm со своим таймаутом, и это не перестраховка:
-     на поддельном событии один из обработчиков честно уходит в бесконечный
-     цикл (что понятно — он рассчитывает на настоящие числа, а получает нули),
-     и без ограничения проверка просто виснет навсегда. V8 такой цикл прерывает,
-     а обычный try/catch — нет. */
-  /* Снимок списка обязателен: вызванный обработчик сам создаёт элементы и
-     вешает на них свои обработчики (карточка доски, строка участника, поле
-     формулы), список растёт прямо во время обхода, и цикл по живой длине
-     никогда не кончается — на первом же прогоне их набралось 125 тысяч. */
+  /* Второй проход: дёргаем собранные обработчики.
+
+     Снимок списка обязателен: вызванный обработчик сам создаёт элементы и
+     вешает на них свои (карточка доски, строка участника, поле формулы),
+     список растёт прямо во время обхода, и цикл по живой длине никогда не
+     кончается — на первом прогоне их набралось 125 тысяч.
+
+     Каждый вызов идёт через vm со своим таймаутом: часть обработчиков на
+     поддельном событии честно уходит в бесконечный цикл (они рассчитывают на
+     настоящие числа, а получают нули), и такой цикл прерывает только V8, а
+     обычный try/catch — нет. */
   const list = handlers.slice();
   sandbox.__handlers = list;
   sandbox.__ev = stubNode('event');
   sandbox.__err = null;
   const refErrors = [];
-  let called = 0, stuck = 0;
+  let stuck = 0;
   for (let i = 0; i < list.length; i++) {
-    called++;
     try {
       vm.runInContext(
         '__err = null; try { __handlers[' + i + '][1](__ev); } catch (e) { __err = e; }',
         sandbox, { timeout: 300 });
       const e = sandbox.__err;
-      // всё, кроме ReferenceError, — это отсутствующее состояние доски на
-      // заглушке, а не дефект кода
       if (e && e.constructor && e.constructor.name === 'ReferenceError')
         refErrors.push([list[i][0], e.message, e]);
-    } catch { stuck++; }        // не уложился в таймаут — не наше дело
+    } catch { stuck++; }
   }
-  console.log('обработчиков вызвано: ' + called +
+  console.log('обработчиков вызвано: ' + list.length +
               (stuck ? ' (' + stuck + ' не уложились в таймаут — пропущены)' : '') +
               (refErrors.length ? '' : ', необъявленных имён среди них нет'));
   if (refErrors.length) {
     failed = true;
     console.error(NL + 'НЕОБЪЯВЛЕННЫЕ ИМЕНА в обработчиках:');
     for (const [where, msg, e] of refErrors) {
-      const line = String(e.stack || '').split(NL).find(l => l.includes('index.html<script>'));
+      const line = String(e.stack || '').split(NL).find(l => l.includes('/js/'));
       console.error('  ' + where + ': ' + msg + (line ? '   ' + line.trim() : ''));
     }
   }
-} catch (e) {
-  failed = true;
-  console.error('\nОШИБКА при загрузке клиента:');
-  console.error('  ' + e.name + ': ' + e.message);
-  const line = (e.stack || '').split('\n').find(l => l.includes('index.html<script>'));
-  if (line) console.error('  ' + line.trim());
-  if (e instanceof ReferenceError)
-    console.error('\n  Похоже на необъявленное имя. В обычном режиме такое молча заводило\n' +
-                  '  глобальную переменную, в строгом (и в ES-модулях) это ошибка.');
-}
-process.exit(failed ? 1 : 0);
+  process.exit(failed ? 1 : 0);
+})();

@@ -44,8 +44,13 @@ lib/store.js       содержимое досок: журнал операци�
 lib/points.js      плотная укладка точек в памяти
 lib/capability.js  кто что может делать с доской
 lib/metrics.js     счётчики для Prometheus
-public/index.html  клиент целиком: движок пера, интерфейс, сеть
+public/index.html  разметка страницы и стили
+public/js/main.js  точка входа: подключает модули в исходном порядке
+public/js/*.js     клиент по частям: core, geometry, shapes, physics, graph,
+                   text, render, net, input, graph-ui, undo, toolbar, menu,
+                   boards, app
 scripts/load-test.js  нагрузка: N ботов в одной доске, замер потолка
+scripts/check-client.js  прогон клиента без браузера (npm run check)
 data/boards/<id>/  содержимое доски: snap.json + log.ndjson
 data/files/<id>/   вставленные картинки, по каталогу на доску
 data/sessions/     сессии (зашифрованы AES-256-GCM)
