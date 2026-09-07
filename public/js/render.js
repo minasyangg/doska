@@ -400,10 +400,19 @@ function handleCursor(h){
 }
 
 function applyCursor(){
-  stage.style.cursor = panning ? 'grabbing'
+  const next = panning ? 'grabbing'
     : (spaceDown ? 'grab'
     : (!canEdit() ? 'not-allowed'
     : (hoverHandleCursor || (CURSOR[S.tool]||'crosshair'))));
+  // Браузер иногда не перерисовывает курсор, если запрошенное значение —
+  // та же строка, что уже была на элементе раньше (не обязательно прямо
+  // перед этим — сравнение идёт с внутренним кэшем движка курсора). Это
+  // проявляется ровно на переключении вида 2→3→2 (маркер → ластик →
+  // маркер): значок пера/маркера пропадал с экрана, хотя S.tool и
+  // CURSOR[S.tool] были верными. Пустая строка между двумя одинаковыми
+  // значениями заставляет браузер честно перерисовать курсор.
+  if(next===stage.style.cursor)stage.style.cursor='';
+  stage.style.cursor = next;
 }
 
 /* Развешивание обработчиков и прочее, что делается при загрузке.
