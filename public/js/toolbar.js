@@ -1,6 +1,6 @@
 /* панель инструментов, меню фигур, настройки пера */
 
-import { FILLS, GRID_MODES, GRID_NAMES, PAPER, PENS, S, STYLED, api, board, mkStroke, outlinePath, recordUndo, redoStack, stage, store } from './core.js';
+import { FILLS, GRID_MODES, GRID_NAMES, MARKERS, PAPER, PENS, S, STYLED, api, board, mkStroke, outlinePath, recordUndo, redoStack, stage, store } from './core.js';
 import { ARC_TYPES, BOX_TYPES, bboxOf } from './geometry.js';
 import { SHAPES, SHAPE_GROUPS, SHAPE_NAMES } from './shapes.js';
 import { fillPeersPop, hint } from './shell.js';

@@ -206,7 +206,7 @@ export function __init() {
 
 /* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  FILLS, GRID_MODES, GRID_NAMES, PAPER, PENS, S, STYLED, api, bctx, board, byId, guestId,
+  FILLS, GRID_MODES, GRID_NAMES, MARKERS, PAPER, PENS, S, STYLED, api, bctx, board, byId, guestId,
   items, lctx, live, mkStroke, outlinePath, paintStroke, pushPoint, recordUndo, redoStack,
   resetContent, simPressure, stage, store, toScreen, toWorld, trace, undoStack,
 };
