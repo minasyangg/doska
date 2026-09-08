@@ -1,13 +1,13 @@
 /* группы и слои, буфер обмена, меню по правой кнопке */
 
-import { GRID_MODES, GRID_NAMES, PAPER, S, board, items, recordUndo, redoStack, store, toWorld } from './core.js';
+import { GRID_MODES, GRID_NAMES, PAPER, S, board, items, recordUndo, redoStack, store } from './core.js';
 import { ARC_TYPES, BACK_TYPES, BOX_TYPES, SELECTABLE, bboxOf, rotAround } from './geometry.js';
 import { paintItem } from './shapes.js';
 import { hint } from './shell.js';
 import { canEdit, mineOnly, newId, refreshSelBar, select, selectMany, selection, selectionBox, updateSelBar } from './selection.js';
 import { applyCursor, drawBoard, drawLive, resize, zoomAt } from './render.js';
 import { addItem, deflate, inflate, net, removeItem } from './net.js';
-import { abortDraft, commitPathDraft, hoverPt, pathDraft, resyncPanning, setSpaceDown, snapGeom, spaceDown } from './input.js';
+import { abortDraft, commitPathDraft, pathDraft, resyncPanning, setSpaceDown, snapGeom, spaceDown } from './input.js';
 import { pushUndo, redo, undo } from './undo.js';
 import { closeAllPopovers, duplicateSelected, popOpen, setTool, updatePenPanel } from './toolbar.js';
 import { nav } from './app.js';
@@ -346,11 +346,13 @@ addEventListener('keydown',e=>{
   if((e.ctrlKey||e.metaKey)&&c==='KeyA'){e.preventDefault();selectAll();return;}
   if((e.ctrlKey||e.metaKey)&&c==='KeyC'){e.preventDefault();copySelected(false);return;}
   if((e.ctrlKey||e.metaKey)&&c==='KeyX'){e.preventDefault();copySelected(true);return;}
-  // Ctrl+V перехватываем только для своего буфера: картинку из системного
-  // ловит обработчик paste, и мешать ему нельзя
-  if((e.ctrlKey||e.metaKey)&&c==='KeyV'&&clipboard.length){
-    e.preventDefault();pasteClipboard(hoverPt?toWorld(hoverPt.x,hoverPt.y):null);return;
-  }
+  // Ctrl+V сюда нарочно не заходит: решение "объект доски или картинка из
+  // системного буфера" принимает обработчик paste в graph-ui.js — только
+  // он реально видит clipboardData. preventDefault() здесь на keydown
+  // подавлял само системное действие «вставить» целиком (проверено —
+  // событие paste после него браузер уже не присылает), и Ctrl+V молча
+  // переставал приносить картинки в ту же секунду, как на доске хоть раз
+  // скопировали любой объект: keydown срабатывал раньше paste и убивал его.
   if((e.ctrlKey||e.metaKey)&&c==='KeyG'){
     e.preventDefault();e.shiftKey?ungroupSelected():groupSelected();return;
   }
@@ -388,5 +390,5 @@ addEventListener('resize',()=>{resize();refreshSelBar();});
 
 /* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  applyZ, openMenu, withGroup,
+  applyZ, openMenu, pasteClipboard, withGroup,
 };
