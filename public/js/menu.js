@@ -83,12 +83,21 @@ function moveLayer(to){
 }
 
 /* Буфер обмена доски. Системный тут не годится: в нём нельзя хранить наши
-   объекты, а картинку из него мы и так умеем принимать (см. вставку). */
-let clipboard=[];
+   объекты, а картинку из него мы и так умеем принимать (см. вставку).
+
+   clipboardAt — когда в последний раз клали что-то сюда. Системный буфер
+   ОС не сообщает, когда его содержимое обновилось, поэтому обработчик
+   paste (graph-ui.js) сравнивает эту метку со своей — временем последней
+   вставленной картинки — и решает, что свежее: скопировали объект на
+   доске уже ПОСЛЕ того, как в последний раз брали картинку из системы, —
+   несём его, а не старую картинку, которая всё ещё лежит в системном
+   буфере просто потому, что туда никто не клал ничего нового. */
+let clipboard=[],clipboardAt=0;
 function copySelected(cut){
   const list=withGroup(selection);
   if(!list.length)return;
   clipboard=list.map(deflate);
+  clipboardAt=Date.now();
   hint((cut?'Вырезано: ':'Скопировано: ')+list.length+
        (list.length===1?' объект':' объекта'));
   if(cut){
@@ -101,6 +110,11 @@ function copySelected(cut){
     recordUndo({type:'erase',items:alive});redoStack.length=0;drawBoard();
   }
 }
+/** Когда на доске в последний раз что-то копировали в свой буфер — 0, если
+    ни разу за сеанс. Даёт paste-обработчику сравнить со своей меткой и
+    решить, что новее: наш объект или картинка, лежащая в системном
+    буфере. */
+const clipboardTime=()=>clipboardAt;
 function pasteClipboard(at){
   if(!clipboard.length)return hint('Буфер пуст');
   if(!canEdit())return hint('Преподаватель закрыл доску для правок');
@@ -390,5 +404,5 @@ addEventListener('resize',()=>{resize();refreshSelBar();});
 
 /* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  applyZ, openMenu, pasteClipboard, withGroup,
+  applyZ, clipboardTime, openMenu, pasteClipboard, withGroup,
 };

@@ -7,7 +7,7 @@ import { localXY, newId, selected } from './selection.js';
 import { drawBoard } from './render.js';
 import { net } from './net.js';
 import { hoverPt, lastPt, placeImage } from './input.js';
-import { pasteClipboard } from './menu.js';
+import { clipboardTime, pasteClipboard } from './menu.js';
 
 /* ── график: список формул ─────────────────────────────────────
    Настраивать до постановки нечего — правим уже стоящий на доске объект,
@@ -172,17 +172,33 @@ document.getElementById('physLabelSize').oninput=e=>{
    приносить картинки насовсем, молча вставляя вместо них старый объект.
 
    Здесь же есть настоящий clipboardData, поэтому и решение принимается
-   здесь: есть в буфере картинка — вставляем её; нет — отдаём Ctrl+V
-   своему буферу объектов, как раньше делал keydown. */
+   здесь. Но «в буфере есть картинка → вставляем картинку» тоже неверно
+   само по себе: системный буфер ОС не сообщает, когда его содержимое
+   обновилось. Сценарий — в буфере уже лежал скриншот, человек скопировал
+   штрих на доске (Ctrl+C трогает только наш внутренний буфер, до
+   системного не дотягивается) и жмёт Ctrl+V: clipboardData всё ещё
+   отдаёт ту же самую старую картинку, и мы вставляли бы её вместо явно
+   только что скопированного объекта.
+
+   Различаем по факту: если картинка та же, что была в прошлый раз (тот
+   же размер файла — этого достаточно, дважды подряд скопировать в ОС
+   два разных изображения ровно одного байтового размера не бывает на
+   практике), а после прошлой вставки на доске успели что-то скопировать
+   — значит именно это «что-то» человек и хочет вставить сейчас. Новая
+   же картинка (другой размер) всегда побеждает — её явно положили в
+   буфер только что, отдельным осознанным действием. */
+let lastImageSize=-1;
 addEventListener('paste',async e=>{
   if(!S.boardId)return;                       // состояние роутера, а не вид DOM
   if(e.target&&/INPUT|TEXTAREA/.test(e.target.tagName))return;
   const list=[...((e.clipboardData&&e.clipboardData.items)||[])];
   const img=list.find(i=>i.kind==='file'&&i.type.startsWith('image/'));
-  if(img){
+  const blob=img&&img.getAsFile();
+  const sameImageAsLastTime=blob&&blob.size===lastImageSize;
+  if(blob&&!(sameImageAsLastTime&&clipboardTime()>0)){
     e.preventDefault();
-    const blob=img.getAsFile();
-    if(blob)placeImage(blob,hoverPt||lastPt);
+    lastImageSize=blob.size;
+    placeImage(blob,hoverPt||lastPt);
     return;
   }
   pasteClipboard(hoverPt?toWorld(hoverPt.x,hoverPt.y):null);
