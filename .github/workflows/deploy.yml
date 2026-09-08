@@ -1,0 +1,38 @@
+name: Деплой на боевой сервер
+
+# Пушится main — сервер сам подтягивает и перезапускается. Ручной SSH
+# для обычного деплоя больше не нужен: deploy.sh на сервере (запускается
+# ограниченным ключом, см. authorized_keys) делает pull, npm run check и
+# только при успехе — pm2 restart. Если check не прошёл, скрипт откатывает
+# рабочую копию на прежний коммит и завершается с ошибкой — pm2 вообще не
+# трогается, урок идёт на прежней рабочей версии, а этот workflow в GitHub
+# становится красным, что и есть сигнал: обратно к правкам.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:   # ручной запуск из вкладки Actions — на случай, если
+                        # нужно повторно применить тот же коммит без нового push
+
+concurrency:
+  # Два деплоя подряд не должны накладываться: пуш во время ещё идущего
+  # деплоя ждёт своей очереди, а не бежит параллельно тем же git-репозиторием
+  # на сервере.
+  group: deploy-doska
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Деплой по SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DOSKA_DEPLOY_HOST }}
+          port: ${{ secrets.DOSKA_DEPLOY_PORT }}
+          username: ${{ secrets.DOSKA_DEPLOY_USER }}
+          key: ${{ secrets.DOSKA_DEPLOY_KEY }}
+          # authorized_keys на сервере игнорирует эту команду и всегда
+          # выполняет свой deploy.sh (command= в ~/.ssh/authorized_keys) —
+          # строка здесь только для ясности в логе экшена.
+          script: echo "деплой запущен через ограниченный ключ — сервер сам решает, что выполнить"
+          script_stop: true
