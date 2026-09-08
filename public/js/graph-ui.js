@@ -1,12 +1,13 @@
 /* панель графика: формулы, точки, параметры */
 
-import { S, stage } from './core.js';
+import { S, stage, toWorld } from './core.js';
 import { GRAPH_COLORS, graphExprOk } from './graph.js';
 import { hint } from './shell.js';
 import { localXY, newId, selected } from './selection.js';
 import { drawBoard } from './render.js';
 import { net } from './net.js';
 import { hoverPt, lastPt, placeImage } from './input.js';
+import { pasteClipboard } from './menu.js';
 
 /* ── график: список формул ─────────────────────────────────────
    Настраивать до постановки нечего — правим уже стоящий на доске объект,
@@ -161,15 +162,30 @@ document.getElementById('physLabelSize').oninput=e=>{
   graphChanged(it);
 };
 
+/* Единственное место, решающее, что делает Ctrl+V. Раньше это решали два
+   независимых обработчика: keydown в menu.js вызывал preventDefault() и
+   тут же вставлял последний скопированный на доске объект, если свой
+   буфер был не пуст, — а картинку из системного буфера должен был ловить
+   этот paste. Но preventDefault() на keydown гасит само системное
+   действие «вставить», и браузер после него не присылает paste вовсе:
+   стоило хоть раз скопировать что-то на доске, и Ctrl+V переставал
+   приносить картинки насовсем, молча вставляя вместо них старый объект.
+
+   Здесь же есть настоящий clipboardData, поэтому и решение принимается
+   здесь: есть в буфере картинка — вставляем её; нет — отдаём Ctrl+V
+   своему буферу объектов, как раньше делал keydown. */
 addEventListener('paste',async e=>{
   if(!S.boardId)return;                       // состояние роутера, а не вид DOM
   if(e.target&&/INPUT|TEXTAREA/.test(e.target.tagName))return;
   const list=[...((e.clipboardData&&e.clipboardData.items)||[])];
   const img=list.find(i=>i.kind==='file'&&i.type.startsWith('image/'));
-  if(!img)return;
-  e.preventDefault();
-  const blob=img.getAsFile();
-  if(blob)placeImage(blob,hoverPt||lastPt);
+  if(img){
+    e.preventDefault();
+    const blob=img.getAsFile();
+    if(blob)placeImage(blob,hoverPt||lastPt);
+    return;
+  }
+  pasteClipboard(hoverPt?toWorld(hoverPt.x,hoverPt.y):null);
 });
 stage.addEventListener('dragover',e=>{e.preventDefault();});
 stage.addEventListener('drop',e=>{
@@ -177,6 +193,20 @@ stage.addEventListener('drop',e=>{
   const f=[...(e.dataTransfer.files||[])].find(f=>f.type.startsWith('image/'));
   if(f)placeImage(f,localXY(e));
 });
+
+/* Кнопка в тулбаре — третий путь загрузить картинку рядом с готовыми
+   вставкой (Ctrl+V) и перетаскиванием: тем, у кого скриншот уже лежит
+   файлом на диске, не нужно вспоминать про Ctrl+V — можно открыть
+   проводник прямо с панели. Курсор чаще всего не наведён на доску в
+   момент клика по панели, поэтому картинка встаёт по центру видимой
+   области — как и вставка без наведения. */
+const imageBtn=document.getElementById('imageBtn'), imageInput=document.getElementById('imageInput');
+imageBtn.onclick=()=>imageInput.click();
+imageInput.onchange=()=>{
+  const f=imageInput.files&&imageInput.files[0];
+  imageInput.value='';               // тот же файл повторно тоже должен давать change
+  if(f)placeImage(f,hoverPt||lastPt);
+};
 
 }
 
