@@ -4,7 +4,7 @@ import { PAPER, S, bctx, board, items, lctx, live, outlinePath, stage, toScreen,
 import { ARC_TYPES, BACK_TYPES, BOX_TYPES, arcPt, arcSweep, bboxOf } from './geometry.js';
 import { paintItem, paintPath, paintShape } from './shapes.js';
 import { paintArc, paintGraphCoordHint } from './graph.js';
-import { angleAt, canEdit, eraserR, handlesFor, selected, selection, selectionBox } from './selection.js';
+import { angleAt, canEdit, eraserR, handlesFor, handlesForGroup, selected, selection, selectionBox } from './selection.js';
 import { net } from './net.js';
 import { arcDraft, current, dragging, hoverHandleCursor, hoverPt, marquee, panning, pathDraft, shapeDraft, spaceDown } from './input.js';
 
@@ -214,7 +214,7 @@ function flushLive(){
   }
   /* Отсчёт угла при повороте: вертикальная нормаль, текущее направление и
      подпись между ними. Без числа поворот на глаз не поставишь. */
-  if(dragging&&(dragging.mode==='rotate'||dragging.mode==='angle')&&
+  if(dragging&&(dragging.mode==='rotate'||dragging.mode==='angle'||dragging.mode==='groupRotate')&&
      typeof dragging.angle==='number'){
     const c=toScreen(dragging.cx,dragging.cy);
     const R=Math.min(120,Math.max(54,dragging.armPx||90));
@@ -242,8 +242,8 @@ function flushLive(){
      Теперь объекты обводятся по собственному контуру мягким ореолом: сразу
      понятно, что именно взято, и написанное остаётся читаемым.
 
-     Ручек у группы нет намеренно: поворот и растяжение группы — отдельная
-     история, а перенос, копия, замок и удаление работают и без них. */
+     У рамки те же 8 ручек, что у одиночного объекта — растяжение и поворот
+     всей группы разом (см. handlesForGroup, groupResize/groupRotate). */
   if(selection.length>1){
     lctx.save();
     lctx.setTransform(dpr,0,0,dpr,0,0);
@@ -279,6 +279,23 @@ function flushLive(){
     lctx.strokeStyle='#2F80ED';lctx.lineWidth=1.5;lctx.setLineDash([6,4]);
     lctx.strokeRect(gp.x-4,gp.y-4,(g.x1-g.x0)*S.cam.z+8,(g.y1-g.y0)*S.cam.z+8);
     lctx.setLineDash([]);
+
+    const ghandles=handlesForGroup();
+    if(ghandles.length){
+      const gcenterS=toScreen((g.x0+g.x1)/2,(g.y0+g.y1)/2);
+      for(const h of ghandles){
+        if(h.kind==='rotate'){
+          lctx.strokeStyle='#2F80ED';lctx.lineWidth=1;lctx.setLineDash([3,3]);
+          lctx.beginPath();lctx.moveTo(gcenterS.x,gcenterS.y);lctx.lineTo(h.sx,h.sy);lctx.stroke();
+          lctx.setLineDash([]);
+          lctx.fillStyle='#fff';lctx.strokeStyle='#2F80ED';lctx.lineWidth=1.5;
+          lctx.beginPath();lctx.arc(h.sx,h.sy,6,0,6.2832);lctx.fill();lctx.stroke();
+        }else{
+          lctx.fillStyle='#fff';lctx.strokeStyle='#2F80ED';lctx.lineWidth=1.5;
+          lctx.beginPath();lctx.rect(h.sx-5,h.sy-5,10,10);lctx.fill();lctx.stroke();
+        }
+      }
+    }
   }
   // рамка протяжки
   if(marquee){

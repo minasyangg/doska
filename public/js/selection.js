@@ -5,7 +5,7 @@ import { ARC_TYPES, BOX_TYPES, SELECTABLE, arcPt, arcSweep, bboxOf, rotAround } 
 import { graphAxisLabelPos, graphPointY } from './graph.js';
 import { hitTest } from './text.js';
 import { drawLive } from './render.js';
-import { dragging, marquee, updatePhysicsPanel } from './input.js';
+import { dragging, hoverHandleCursor, marquee, updatePhysicsPanel } from './input.js';
 
 let selection=[];
 let selected=null,seqNo=0;
@@ -50,8 +50,12 @@ function refreshSelBar(){
   const bar=document.getElementById('selbar');
   // Пока объект тащат, тянут за ручку или поворачивают, панель убирается: она
   // висит над рамкой и в жесте только мешает — закрывает то, что двигают, и
-  // подсовывает корзину под руку.
-  const busy=!!dragging||!!marquee;
+  // подсовывает корзину под руку. Наведение на саму ручку (ещё не жест, но
+  // курсор уже показывает resize/rotate) убирает её по той же причине: у
+  // узкого выделения ручка над верхним краем (что у одиночного объекта,
+  // что у общей рамки группы) может физически оказаться под панелью, и
+  // клик по ручке попадал бы в кнопку замка вместо начала поворота.
+  const busy=!!dragging||!!marquee||!!hoverHandleCursor;
   bar.classList.toggle('show',selection.length>0&&!busy);
   if(!selection.length||busy)return;
   const b=selectionBox();
@@ -181,7 +185,54 @@ function handlesFor(it){
   }
   return handles;
 }
+/* Ручки группы — те же 8, что у одиночного объекта (4 угла + 4 стороны +
+   поворот), только вокруг общей рамки selectionBox(), а не вокруг одного
+   объекта. Рамка группы своего поля rot не хранит (это не объект, а
+   временный охват нескольких), поэтому в состоянии покоя она всегда по
+   осям; во время самого жеста поворота/растяжения input.js крутит и
+   тянет её визуально через dragging.groupRot — так же, как одиночный
+   поворот показывает текущий угол жеста, не трогая поле rot до отпускания. */
+function handlesForGroup(){
+  if(selection.length<2)return[];
+  if(selection.every(it=>it.locked))return[];
+  const b=selectionBox();
+  const corners={nw:{x:b.x0,y:b.y0},ne:{x:b.x1,y:b.y0},sw:{x:b.x0,y:b.y1},se:{x:b.x1,y:b.y1}};
+  const s={};for(const k in corners)s[k]=toScreen(corners[k].x,corners[k].y);
+  const handles=[
+    {name:'nw',kind:'corner',sx:s.nw.x,sy:s.nw.y},{name:'ne',kind:'corner',sx:s.ne.x,sy:s.ne.y},
+    {name:'sw',kind:'corner',sx:s.sw.x,sy:s.sw.y},{name:'se',kind:'corner',sx:s.se.x,sy:s.se.y}
+  ];
+  const mid=(a,b)=>({x:(a.x+b.x)/2,y:(a.y+b.y)/2});
+  const wide=Math.hypot(s.ne.x-s.nw.x,s.ne.y-s.nw.y)>44;
+  const tall=Math.hypot(s.sw.x-s.nw.x,s.sw.y-s.nw.y)>44;
+  const edges={n:[mid(s.nw,s.ne),wide],s:[mid(s.sw,s.se),wide],
+               w:[mid(s.nw,s.sw),tall],e:[mid(s.ne,s.se),tall]};
+  for(const name in edges){
+    const [p,show]=edges[name];
+    if(show)handles.push({name,kind:'edge',sx:p.x,sy:p.y});
+  }
+  const midW={x:(corners.nw.x+corners.ne.x)/2,y:(corners.nw.y+corners.ne.y)/2};
+  const midS=toScreen(midW.x,midW.y);
+  /* 56, не 24, как у одиночного объекта: панель выделения (#selbar, замок
+     и корзина) висит над рамкой на 46px и по центру верхней грани — ровно
+     там, где иначе оказалась бы ручка поворота у узкой группы. Клик по
+     ручке тогда попадал бы в кнопку панели вместо начала поворота, и хуже
+     того — панель прячется по наведению на ручку (см. refreshSelBar), а
+     навести на неё нельзя же, если она сама эту точку перекрывает: заявка
+     на pointermove до stage не доходит, обработчик её не видит. Единственный
+     надёжный выход — не пересекаться с панелью вовсе, а не пытаться прятать
+     её в последний момент. */
+  handles.push({name:'rot',kind:'rotate',sx:midS.x,sy:midS.y-56});
+  return handles;
+}
 function handleAt(sp){
+  if(selection.length>1){
+    for(const h of handlesForGroup()){
+      const tol=9;
+      if(Math.abs(sp.x-h.sx)<tol&&Math.abs(sp.y-h.sy)<tol)return h;
+    }
+    return null;
+  }
   if(!selected)return null;
   for(const h of handlesFor(selected)){
     // подпись оси — не точка, а флажок с текстом переменной длины (имя
@@ -210,7 +261,7 @@ export function __init() {
 
 /* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  angleAt, canEdit, clearSelected, eraserR, handleAt, handlesFor, inSelection, itemAt, itemsIn,
+  angleAt, canEdit, clearSelected, eraserR, handleAt, handlesFor, handlesForGroup, inSelection, itemAt, itemsIn,
   localXY, mineOnly, newId, refreshSelBar, select, selectMany, selected, selection,
   selectionBox, updateSelBar,
 };

@@ -5,7 +5,7 @@ import { ARC_TYPES, BOX_TYPES, arcSweep, bboxOf, normAngle, rotAround } from './
 import { GRAPH_COLORS, GRAPH_HEADER_H, cloneProps, graphCompile, graphEval, nextPointLabel, zoomGraphAt } from './graph.js';
 import { hitTest } from './text.js';
 import { hint } from './shell.js';
-import { angleAt, canEdit, eraserR, handleAt, inSelection, itemAt, itemsIn, localXY, mineOnly, newId, refreshSelBar, select, selectMany, selected, selection } from './selection.js';
+import { angleAt, canEdit, eraserR, handleAt, inSelection, itemAt, itemsIn, localXY, mineOnly, newId, refreshSelBar, select, selectMany, selected, selection, selectionBox } from './selection.js';
 import { applyCursor, camChanged, drawBoard, drawLive, handleCursor, zoomAt } from './render.js';
 import { addItem, deflate, net, removeItem } from './net.js';
 import { renderGraphExpressions, renderGraphParams } from './graph-ui.js';
@@ -634,6 +634,32 @@ stage.addEventListener('pointerdown',e=>{
   /* выделение объектов */
   if(S.tool==='select'){
     const h=handleAt(pt);
+    /* Ручки группы — тянем/крутим всех выделенных одним жестом вокруг общей
+       рамки. Работает тем же способом, что и одиночный объект: резайз идёт
+       от неподвижного противоположного угла общей рамки, поворот — вокруг
+       её центра; каждый объект внутри группы двигается своей же формулой
+       (BOX — через x/y/w/h/rot, штрих/линия — через свои точки), просто все
+       разом на один и тот же коэффициент растяжения или угол. */
+    if(h&&selection.length>1){
+      const unlocked=selection.filter(it=>!it.locked);
+      if(!unlocked.length)return;
+      const list=unlocked.map(it=>({it,start:snapshotItem(it)}));
+      if(h.kind==='rotate'){
+        const b=selectionBox(),cx=(b.x0+b.x1)/2,cy=(b.y0+b.y1)/2;
+        dragging={mode:'groupRotate',list,cx,cy,a0:Math.atan2(w.y-cy,w.x-cx)};
+      }else{
+        const anchor=OPPOSITE_CORNER[h.name];
+        const b=selectionBox();
+        const axis=h.kind==='edge'?(h.name==='n'||h.name==='s'?'y':'x'):'xy';
+        const anchorWorld={
+          x:axis==='y'?(b.x0+b.x1)/2:(anchor.includes('e')?b.x1:b.x0),
+          y:axis==='x'?(b.y0+b.y1)/2:(anchor.includes('s')?b.y1:b.y0)
+        };
+        dragging={mode:'groupResize',list,corner:h.name,anchor,axis,anchorWorld,
+                  startBox:b,w0:Math.max(1,b.x1-b.x0),h0:Math.max(1,b.y1-b.y0)};
+      }
+      return;
+    }
     if(h&&selected&&!selected.locked){
       if(h.kind==='rotate'){
         const b=bboxOf(selected);
@@ -814,6 +840,54 @@ stage.addEventListener('pointermove',e=>{
       }
       drawBoard();refreshSelBar();drawLive();return;
     }
+    if(dragging.mode==='groupRotate'){
+      let delta=Math.atan2(w.y-dragging.cy,w.x-dragging.cx)-dragging.a0;
+      if(e.shiftKey){const step=Math.PI/12;delta=Math.round(delta/step)*step;}
+      const cx=dragging.cx,cy=dragging.cy;
+      for(const m of dragging.list){
+        const t=m.it,s0=m.start;
+        if(BOX_TYPES.has(t.type)){
+          const c0=rotAround(s0.x+s0.w/2,s0.y+s0.h/2,cx,cy,delta);
+          t.rot=(s0.rot||0)+delta; t.x=c0.x-s0.w/2; t.y=c0.y-s0.h/2;
+        }else if(ARC_TYPES.has(t.type)){
+          const c0=rotAround(s0.cx,s0.cy,cx,cy,delta);
+          t.cx=c0.x; t.cy=c0.y; t.a0=s0.a0+delta; t.a1=s0.a1+delta;
+        }else if(Array.isArray(s0.pts)){
+          t.pts=s0.pts.map(p=>{const r=rotAround(p.x,p.y,cx,cy,delta);return('p' in p)?{x:r.x,y:r.y,p:p.p}:{x:r.x,y:r.y};});
+        }
+        t.bbox=bboxOf(t);
+      }
+      dragging.angle=normAngle(delta);
+      drawBoard();refreshSelBar();drawLive();return;
+    }
+    if(dragging.mode==='groupResize'){
+      const axis=dragging.axis;
+      const ax=dragging.anchorWorld.x,ay=dragging.anchorWorld.y;
+      // Тот же приём, что у одиночного штриха при resize (см. mode==='resize'
+      // ниже): модуль расстояния от неподвижного якоря, без знака. Со знаком
+      // группа выворачивалась бы наизнанку, стоило перетащить курсор через
+      // противоположный край, — и для группы из разнородных объектов это
+      // особенно сбивало бы с толку. Общий масштаб один на всех — иначе
+      // группа растягивалась бы вразнобой вместо единого целого.
+      const sx=axis==='y'?1:Math.max(0.02,Math.abs(w.x-ax))/dragging.w0;
+      const sy=axis==='x'?1:Math.max(0.02,Math.abs(w.y-ay))/dragging.h0;
+      for(const m of dragging.list){
+        const t=m.it,s0=m.start;
+        if(BOX_TYPES.has(t.type)){
+          const cx0=s0.x+s0.w/2,cy0=s0.y+s0.h/2;
+          const nw=Math.max(4,s0.w*sx),nh=Math.max(4,s0.h*sy);
+          const ncx=ax+(cx0-ax)*sx, ncy=ay+(cy0-ay)*sy;
+          t.w=nw; t.h=nh; t.x=ncx-nw/2; t.y=ncy-nh/2;
+        }else if(ARC_TYPES.has(t.type)){
+          const k=(sx+sy)/2;
+          t.cx=ax+(s0.cx-ax)*sx; t.cy=ay+(s0.cy-ay)*sy; t.r=s0.r*k;
+        }else if(Array.isArray(s0.pts)){
+          t.pts=s0.pts.map(p=>('p' in p)?{x:ax+(p.x-ax)*sx,y:ay+(p.y-ay)*sy,p:p.p}:{x:ax+(p.x-ax)*sx,y:ay+(p.y-ay)*sy});
+        }
+        t.bbox=bboxOf(t);
+      }
+      drawBoard();refreshSelBar();drawLive();return;
+    }
     if(dragging.mode==='graphPan'){
       // та же арифметика, что у панорамы всей доски, только в координатах
       // объекта и с отражённым Y (в математике «вверх» положительно)
@@ -942,11 +1016,16 @@ stage.addEventListener('pointermove',e=>{
   }
   if(erasing){eraseAt(pt);return;}
 
-  // Наведение на ручку — меняем курсор на стрелку нужного направления.
-  if(!dragging&&S.tool==='select'&&selected){
+  // Наведение на ручку — меняем курсор на стрелку нужного направления и,
+  // если панель выделения нависает над самой ручкой (см. refreshSelBar),
+  // на время наведения прячем и её — иначе клик по ручке попадал бы в
+  // кнопку панели, а не начинал жест.
+  // handleAt сам знает про группу (см. selection.js): для неё вернёт ручку
+  // из handlesForGroup, для одиночного выделения — как раньше.
+  if(!dragging&&S.tool==='select'&&(selected||selection.length>1)){
     const c=handleCursor(handleAt(pt));
-    if(c!==hoverHandleCursor){hoverHandleCursor=c;applyCursor();}
-  }else if(hoverHandleCursor){hoverHandleCursor=null;applyCursor();}
+    if(c!==hoverHandleCursor){hoverHandleCursor=c;applyCursor();refreshSelBar();}
+  }else if(hoverHandleCursor){hoverHandleCursor=null;applyCursor();refreshSelBar();}
 
   if(!current||e.pointerId!==drawId){
     if(e.pointerType!=='touch')net.cursor(toWorld(pt.x,pt.y));
