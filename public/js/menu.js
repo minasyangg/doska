@@ -7,7 +7,7 @@ import { hint } from './shell.js';
 import { canEdit, mineOnly, newId, refreshSelBar, select, selectMany, selection, selectionBox, updateSelBar } from './selection.js';
 import { applyCursor, drawBoard, drawLive, resize, zoomAt } from './render.js';
 import { addItem, deflate, inflate, net, removeItem } from './net.js';
-import { abortDraft, commitPathDraft, pathDraft, resyncPanning, setSpaceDown, snapGeom, spaceDown } from './input.js';
+import { abortDraft, commitPathDraft, pathDraft, resyncPanning, setSpaceDown, snapGeom, spaceDown, wireGeom } from './input.js';
 import { pushUndo, redo, undo } from './undo.js';
 import { closeAllPopovers, duplicateSelected, popOpen, setTool, updatePenPanel } from './toolbar.js';
 import { nav } from './app.js';

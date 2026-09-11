@@ -1219,5 +1219,5 @@ document.getElementById('physMass').oninput=e=>{
 export {
   abortDraft, arcDraft, clearMarquee, commitPathDraft, current, dragging, hoverHandleCursor,
   hoverPt, lastPt, marquee, panning, pathDraft, placeImage, resyncPanning, setSpaceDown,
-  shapeDraft, snapGeom, spaceDown, updatePhysicsPanel,
+  shapeDraft, snapGeom, spaceDown, updatePhysicsPanel, wireGeom,
 };

@@ -7,7 +7,7 @@ import { fillPeersPop, hint } from './shell.js';
 import { newId, select, selectMany, selection } from './selection.js';
 import { applyCursor, camChanged, dpr, drawBoard, drawLive, zoomAt } from './render.js';
 import { addItem, deflate, net, removeItem } from './net.js';
-import { clearMarquee, snapGeom, updatePhysicsPanel } from './input.js';
+import { clearMarquee, snapGeom, updatePhysicsPanel, wireGeom } from './input.js';
 import { pushUndo, redo, undo } from './undo.js';
 import { openSettings } from './boards.js';
 

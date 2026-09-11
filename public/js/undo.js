@@ -5,6 +5,7 @@ import { bboxOf } from './geometry.js';
 import { refreshSelBar, selectMany, selection } from './selection.js';
 import { drawBoard, drawLive } from './render.js';
 import { addItem, deflate, net, removeItem } from './net.js';
+import { wireGeom } from './input.js';
 
 /* ═══════════════════ отмена ═══════════════════ */
 /* Одна операция человека = одна запись в истории, даже если она тронула
