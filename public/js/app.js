@@ -93,9 +93,17 @@ function showView(what){
 }
 const showBoard=on=>showView(on?'board':'dash');
 
-/** Переход внутри приложения: настоящий путь, а не хеш. */
-function nav(path){
-  if(location.pathname+location.search!==path)window.history.pushState(null,'',path);
+/** Переход внутри приложения: настоящий путь, а не хеш.
+
+    replace=true кладёт запись поверх текущей вместо новой — так делаем при
+    входе на доску из списка: иначе список остаётся в истории «перед» доской,
+    и на планшете свайп-назад по краю экрана (жест самого браузера, не наш)
+    выкидывает прямо туда, что выглядит как самопроизвольный выход с доски. */
+function nav(path,replace){
+  if(location.pathname+location.search!==path){
+    if(replace)window.history.replaceState(null,'',path);
+    else window.history.pushState(null,'',path);
+  }
   route();
 }
 

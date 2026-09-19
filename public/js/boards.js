@@ -120,7 +120,7 @@ function boardCard(b){
   el.querySelector('.when').textContent=
     (b.mine?'':'ведёт '+(b.ownerName||'преподаватель')+' · ')+'изменена '+when(b.updated||b.created);
 
-  const open=()=>nav('/board/'+b.id);
+  const open=()=>nav('/board/'+b.id,true);
   el.onclick=e=>{
     if(el.classList.contains('editing'))return;
     if(!e.target.closest('.cardtool'))open();
@@ -443,7 +443,7 @@ document.getElementById('newBoard').onclick=async()=>{
   if(t===null)return;
   try{
     const d=await api('/boards',{method:'POST',body:{title:t}});
-    nav('/board/'+d.board.id);
+    nav('/board/'+d.board.id,true);
   }catch(e){alert('Не получилось: '+e.message);}
 };
 

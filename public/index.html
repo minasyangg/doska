@@ -49,9 +49,12 @@
   .edge::after{content:'';width:3px;height:34px;border-radius:2px;background:var(--muted)}
   /* кнопка «закрепить/убрать» — тонкая ручка сверху панели, а не кнопка
      инструмента: ниже обычной и с уменьшенным значком */
-  .tool.pin{height:22px;color:var(--muted)}
-  .tool.pin svg{width:15px;height:15px}
-  .tool.pin.off{color:var(--text)}
+  /* Закреплена — заметный акцентный цвет (это «включено», как и у других
+     активных инструментов); откреплена — обычный приглушённый вид. Раньше
+     обе разницы держались на оттенке серого и терялись из виду. */
+  .tool.pin{height:26px;color:#7AA2FF}
+  .tool.pin svg{width:18px;height:18px}
+  .tool.pin.off{color:var(--muted)}
   /* flex:none обязателен: в колонке с ограниченной высотой флекс поджимал
      кнопки, и на невысоком экране они выходили 23 px — мимо пальца. Пусть
      лучше панель прокручивается, чем мельчает. */
@@ -348,6 +351,16 @@
     /* панель над выделением не должна нырять под полосу инструментов */
     .selbar{max-width:calc(100vw - 16px)}
   }
+  /* Планшет шире 700px уже не попадает в мобильную раскладку выше и держит
+     зумбар в углу экрана — а именно там браузер/ОС на тач-устройствах ловит
+     свайп-жест «назад». Кнопки сами по себе не виноваты, но чем дальше они
+     от кромки экрана, тем реже палец случайно заденет именно эту зону при
+     письме рядом с краем. Ловим тач-устройство через hover:none и pointer:
+     coarse, а не через ширину экрана — так правило работает на любом
+     планшете независимо от ориентации и размера. */
+  @media (hover:none) and (pointer:coarse) and (min-width:701px){
+    .zoombar{right:28px;bottom:28px}
+  }
   @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -638,7 +651,9 @@
   <button class="mini" id="zoomOut" title="Отдалить">−</button>
   <div id="zoom">100%</div>
   <button class="mini" id="zoomIn" title="Приблизить">+</button>
-  <button class="mini" id="home" title="К началу (0)">⌂</button>
+  <button class="mini ic" id="home" title="Сбросить масштаб и вернуться в начало (0)">
+    <svg viewBox="0 0 24 24"><path d="M4 11.5L12 4l8 7.5"/><path d="M6 10v9.5a1 1 0 0 0 1 1h3v-6h4v6h3a1 1 0 0 0 1-1V10"/></svg>
+  </button>
 </div>
 
 <!-- Панель над выделением: только то, что нужно под рукой каждую минуту.
