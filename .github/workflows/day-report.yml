@@ -18,6 +18,12 @@ on:
       day:
         description: 'Дата ГГГГ-ММ-ДД (пусто — сегодня)'
         required: false
+  # Правка этого файла — сразу пробный отчёт. Заодно это то, что регистрирует
+  # workflow в GitHub: файл только с расписанием и ручным запуском, ни разу
+  # не запущенный, во вкладке Actions не появлялся вовсе.
+  push:
+    branches: [main]
+    paths: ['.github/workflows/day-report.yml']
 
 jobs:
   report:
