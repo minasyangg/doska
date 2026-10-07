@@ -1,0 +1,64 @@
+name: Отчёт о занятиях в Telegram
+
+# Каждый вечер — сводка, какие занятия прошли за день; приходит и тогда,
+# когда занятий не было. Отчёт собирает сам сервер (scripts/day-report.js
+# по логу входов и выходов), а отправляет его GitHub: с сервера Telegram
+# не открывается, а отсюда — да.
+#
+# Ключ DOSKA_REPORT_KEY на сервере ограничен (command= в authorized_keys):
+# им можно только напечатать отчёт, ничего больше. Адрес, порт и
+# пользователь — те же секреты, что у деплоя.
+on:
+  schedule:
+    # 23:00 по Москве = 20:00 UTC. GitHub запускает расписание с опозданием
+    # до нескольких минут — для вечернего отчёта это неважно.
+    - cron: '0 20 * * *'
+  workflow_dispatch:   # ручной запуск из вкладки Actions — проверить или
+    inputs:            # прислать отчёт за прошлый день
+      day:
+        description: 'Дата ГГГГ-ММ-ДД (пусто — сегодня)'
+        required: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Забрать отчёт с сервера
+        env:
+          KEY: ${{ secrets.DOSKA_REPORT_KEY }}
+          HOST: ${{ secrets.DOSKA_DEPLOY_HOST }}
+          PORT: ${{ secrets.DOSKA_DEPLOY_PORT }}
+          SSH_USER: ${{ secrets.DOSKA_DEPLOY_USER }}
+          DAY: ${{ inputs.day }}
+        run: |
+          install -m 600 /dev/null key
+          printf '%s\n' "$KEY" > key
+          # дата уходит как «команда» ssh: сервер её не выполняет, а только
+          # передаёт скрипту, и тот принимает лишь строку вида ГГГГ-ММ-ДД
+          ssh -i key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+              -o ConnectTimeout=30 -p "$PORT" "$SSH_USER@$HOST" "${DAY:-today}" > report.txt
+          rm -f key
+          # сам текст в лог не выводим: в нём имена учеников
+          test -s report.txt
+          echo "отчёт получен: $(wc -l < report.txt) строк"
+
+      - name: Отправить в Telegram
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          curl -sS --fail-with-body -o /dev/null -X POST "https://api.telegram.org/bot$TOKEN/sendMessage" \
+               --data-urlencode "chat_id=$CHAT" --data-urlencode "text@report.txt"
+
+      # Молчание не должно означать «всё хорошо»: если отчёт не собрался,
+      # об этом тоже приходит сообщение.
+      - name: Сообщить, что отчёт не собрался
+        if: failure()
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -sS -o /dev/null -X POST "https://api.telegram.org/bot$TOKEN/sendMessage" \
+               --data-urlencode "chat_id=$CHAT" \
+               --data-urlencode "text=⚠️ Отчёт о занятиях за сегодня не собрался. Подробности: $RUN"
