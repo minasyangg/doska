@@ -52,7 +52,10 @@ const net={
     const ws=new WebSocket(u); this.ws=ws;
     ws.binaryType='arraybuffer';
     this.pend=null;
-    ws.onopen=()=>{this.tries=0;setConn('ok','На связи');
+    // замер входа (см. reportLoad); nav — первое подключение после загрузки
+    // страницы: тогда t0 и есть время, ушедшее на саму страницу
+    this.perf={t0:performance.now(),nav:!this.wasConnected};this.wasConnected=true;
+    ws.onopen=()=>{this.tries=0;setConn('ok','На связи');this.perf.open=performance.now();
       // Переподключение: то, что уже нарисовано, на экране осталось — не
       // держим прелоадер до нового 'init', снимаем сразу по факту связи.
       if(boardLoaded)hideBoardLoader();
@@ -82,11 +85,33 @@ const net={
      доски — иначе её же init это и затёр бы. */
   recv(ws,data){
     if(ws!==this.ws)return;
-    if(this.pend){this.pend.push(data);if(this.pend.length===1)this.unpackInit(ws);return;}
+    const p=this.perf;
+    if(this.pend){
+      this.pend.push(data);
+      if(this.pend.length===1){p.data=performance.now();p.bytes=data.byteLength||data.length;this.unpackInit(ws);}
+      return;
+    }
     if(typeof data!=='string')return;
     let m;try{m=JSON.parse(data);}catch{return;}
-    if(m.t==='init'&&m.z){this.pendHead=m;this.pend=[];return;}
+    if(m.t==='init'&&m.z){p.head=performance.now();p.z=1;this.pendHead=m;this.pend=[];return;}
+    if(m.t==='init'&&!p.sent){p.head=p.data=performance.now();p.bytes=data.length;p.z=0;}
     try{this.on(m);}catch{}
+    if(m.t==='init')this.reportLoad(ws);
+  },
+  /* Сколько у человека открывалась доска и на что ушло время — одной
+     строкой в журнал сервера. Без этого «грузится пять секунд» было не
+     проверить: сеть, сервер или браузер, сжатой пришла доска или нет. */
+  reportLoad(ws){
+    const p=this.perf;if(!p||p.sent||!p.open)return;p.sent=true;
+    p.apply=performance.now();
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{
+      if(ws!==this.ws)return;
+      const now=performance.now(),r=v=>Math.max(0,Math.round(v||0));
+      this.send({t:'perf',z:p.z,kb:r(p.bytes/1024),items:items.length,
+        open:r(p.open-p.t0),wait:r(p.head-p.open),data:r(p.data-p.head),
+        unpack:r((p.unpack||p.data)-p.data),apply:r(p.apply-(p.unpack||p.data)),
+        paint:r(now-p.apply),total:r(now-p.t0),page:p.nav?r(p.t0):undefined});
+    }));
   },
   async unpackInit(ws){
     const head=this.pendHead;
@@ -103,8 +128,10 @@ const net={
       this.noZ=true;this.pend=null;ws.close();return;
     }
     if(ws!==this.ws)return;              // за время распаковки ушли с доски
+    this.perf.unpack=performance.now();
     const rest=this.pend.slice(1);this.pend=null;this.pendHead=null;
     try{this.on(head);}catch{}
+    this.reportLoad(ws);
     for(const d of rest)this.recv(ws,d);
   },
 

@@ -1559,6 +1559,23 @@ wss.on('connection', (ws, req) => {
     const mine = it => owner || room.anyEdit || (it.by != null && it.by === ws.me.uid);
 
     switch (m.t) {
+      /* Сводка от браузера: за сколько у человека открылась доска и на что
+         ушло время. Одна строка в журнал на подключение; формат нарочно не
+         похож на «+ имя (роль) → n» — scripts/day-report.js её не считает. */
+      case 'perf': {
+        if (ws.perfLogged) return;
+        ws.perfLogged = true;
+        const n = k => Math.min(600000, Math.max(0, Math.round(+m[k] || 0)));
+        const s = k => (n(k) / 1000).toFixed(1);
+        const mb = (n('kb') / 1024).toFixed(2);
+        console.log('[' + room.id + '] доска у ' + ws.me.name + ' открылась за ' + s('total') + ' с' +
+          (m.page != null ? ' (+ страница ' + s('page') + ' с)' : '') + ': связь ' + s('open') +
+          (m.z ? ', ответ сервера ' + s('wait') + ', загрузка ' + mb + ' МБ сжатой ' + s('data') +
+                 ', распаковка ' + s('unpack')
+               : ', ответ и загрузка ' + mb + ' МБ без сжатия ' + s('wait')) +
+          ', разбор ' + s('apply') + ', кадр ' + s('paint') + ' · объектов ' + n('items'));
+        return;
+      }
       case 'live': {
         if (!mayEdit || !mayRelay(ws)) return;
         const live = cleanLive(m);
