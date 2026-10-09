@@ -50,12 +50,15 @@ const net={
     if(!u){setConn('off','Файл открыт локально — синхронизации нет');return;}
     setConn('wait','Подключаюсь…');
     const ws=new WebSocket(u); this.ws=ws;
+    ws.binaryType='arraybuffer';
+    this.pend=null;
     ws.onopen=()=>{this.tries=0;setConn('ok','На связи');
       // Переподключение: то, что уже нарисовано, на экране осталось — не
       // держим прелоадер до нового 'init', снимаем сразу по факту связи.
       if(boardLoaded)hideBoardLoader();
-      ws.send(JSON.stringify({t:'join',room:S.boardId,name:S.name}));};
-    ws.onmessage=e=>{try{this.on(JSON.parse(e.data));}catch{}};
+      const z=typeof DecompressionStream==='function'&&!this.noZ?'gzip':undefined;
+      ws.send(JSON.stringify({t:'join',room:S.boardId,name:S.name,z}));};
+    ws.onmessage=e=>this.recv(ws,e.data);
     ws.onclose=ev=>{
       if(ev.code===4004){hideBoardLoader();setConn('off','Доска удалена');return;}
       if(ev.code===4003){hideBoardLoader();setConn('off','Доступ к доске закрыт');deniedScreen();return;}
@@ -69,8 +72,41 @@ const net={
     };
     ws.onerror=()=>{};
   },
-  close(){if(this.ws){this.ws.onclose=null;this.ws.close();this.ws=null;}hideBoardLoader();},
+  close(){if(this.ws){this.ws.onclose=null;this.ws.close();this.ws=null;}this.pend=null;hideBoardLoader();},
   send(o){if(this.ws&&this.ws.readyState===1)this.ws.send(JSON.stringify(o));},
+
+  /* Доска при входе приходит сжатой: 'init' без объектов и следом двоичный
+     кадр с ними (gzip, см. sendInit в server.js) — на тяжёлой доске это 1.4 МБ
+     вместо 5.8. Распаковка асинхронная, и всё, что успеет прийти за это время
+     (чужой штрих, курсор), придерживаем в pend и применяем строго после
+     доски — иначе её же init это и затёр бы. */
+  recv(ws,data){
+    if(ws!==this.ws)return;
+    if(this.pend){this.pend.push(data);if(this.pend.length===1)this.unpackInit(ws);return;}
+    if(typeof data!=='string')return;
+    let m;try{m=JSON.parse(data);}catch{return;}
+    if(m.t==='init'&&m.z){this.pendHead=m;this.pend=[];return;}
+    try{this.on(m);}catch{}
+  },
+  async unpackInit(ws){
+    const head=this.pendHead;
+    try{
+      const gz=this.pend[0];
+      if(typeof gz==='string')throw new Error('ждали двоичный кадр');
+      const text=await new Response(new Blob([gz]).stream()
+        .pipeThrough(new DecompressionStream('gzip'))).text();
+      head.items=JSON.parse(text);
+    }catch{
+      // Не распаковалось — переподключаемся и просим доску как раньше,
+      // несжатой. Один раз на вкладку: noZ дальше держится до перезагрузки.
+      if(ws!==this.ws)return;
+      this.noZ=true;this.pend=null;ws.close();return;
+    }
+    if(ws!==this.ws)return;              // за время распаковки ушли с доски
+    const rest=this.pend.slice(1);this.pend=null;this.pendHead=null;
+    try{this.on(head);}catch{}
+    for(const d of rest)this.recv(ws,d);
+  },
 
   on(m){
     switch(m.t){

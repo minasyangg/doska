@@ -148,6 +148,9 @@ async function loadRoomNow(id) {
     размер правки, а не размер доски. */
 function record(r, op) {
   store.append(r.id, op);
+  // содержимое изменилось — сжатая доска для входящих (см. sendInit) устарела
+  r.ver = (r.ver | 0) + 1;
+  r.initCache = null;
 }
 
 /** Метаданные из БД перекрывают файловый кэш — источник правды один. */
@@ -1054,10 +1057,79 @@ function mayRelay(ws) {
   return true;
 }
 
-const send = (ws, o) => { if (ws.readyState === 1) ws.send(JSON.stringify(o)); };
+/* Всё, что уходит участнику, идёт через out(). Пока ему готовят доску
+   (ws.held — см. sendInit), сообщения не отправляются, а копятся и уходят
+   следом за ней в том же порядке: иначе чужой штрих, нарисованный в эти
+   миллисекунды, пришёл бы раньше доски и был бы ею же затёрт. */
+function out(ws, s) {
+  if (ws.readyState !== 1) return;
+  if (ws.held) ws.held.push(s); else ws.send(s);
+}
+const send = (ws, o) => out(ws, JSON.stringify(o));
 function broadcast(room, o, except) {
   const s = JSON.stringify(o);
-  for (const c of room.clients) if (c !== except && c.readyState === 1) c.send(s);
+  for (const c of room.clients) if (c !== except) out(c, s);
+}
+
+/* ─── доска для входящего ───
+
+   Тяжёлая доска — это мегабайты JSON: на доске в 13 600 штрихов init весил
+   5.8 МБ и шёл несжатым, по сети это секунды. Сжатие всего WebSocket
+   (perMessageDeflate) не берём нарочно: браузер стал бы сжимать каждый кадр
+   живого штриха, а одноядерный сервер — распаковывать, то есть дороже
+   стало бы именно рисование. Сжимаем только доску при входе: gzip уровня 4,
+   5.8 МБ → 1.44 МБ за ~0.1 с, причём в пуле потоков zlib, не останавливая
+   приём штрихов.
+
+   Сжатое держим в room.initCache, пока доска не менялась (record() и
+   прореживание в store.snapshot поднимают room.ver): несколько входов подряд
+   — учитель и ученики к началу урока, все сразу после перезапуска сервера —
+   собирают и сжимают её один раз.
+
+   Клиент без DecompressionStream (старые Safari) о сжатии не просит и
+   получает доску как раньше. */
+const INIT_GZIP_LEVEL = 4;
+const gzip = (buf) => new Promise((ok, no) =>
+  zlib.gzip(buf, { level: INIT_GZIP_LEVEL }, (e, r) => e ? no(e) : ok(r)));
+
+function initHead(ws, room) {
+  // uid отдаём только самому себе: клиенту он нужен, чтобы понимать, какие
+  // объекты его собственные, а остальным участникам знать его незачем
+  return { t: 'init', you: { ...peerInfo(ws), uid: ws.me.uid },
+           title: room.title, locked: room.locked, anyEdit: room.anyEdit,
+           peers: [...room.clients].filter(c => c !== ws).map(peerInfo) };
+}
+
+function sendInit(ws, room, packed) {
+  const head = initHead(ws, room);
+  if (!packed) { send(ws, { ...head, items: room.items.map(i => pt.wire(i)) }); return; }
+
+  let c = room.initCache;
+  if (!c || c.ver !== (room.ver | 0)) {
+    // Строку собираем сейчас же: это и есть доска на момент входа. Всё, что
+    // изменится дальше, придёт этому участнику отдельными сообщениями.
+    const json = JSON.stringify(room.items.map(i => pt.wire(i)));
+    c = room.initCache = { ver: room.ver | 0, gz: gzip(json) };
+    // не вышло сжать — этот кэш не нужен никому; входящий получит как раньше
+    c.gz.catch(() => { if (room.initCache === c) room.initCache = null; });
+  }
+  ws.held = [];
+  const release = () => { const held = ws.held || []; ws.held = null; for (const s of held) out(ws, s); };
+  c.gz.then(buf => {
+    if (ws.readyState !== 1) return;
+    ws.send(JSON.stringify({ ...head, z: 'gzip' }));
+    ws.send(buf);                         // двоичный кадр сразу следом
+    release();
+  }, e => {
+    console.error('[' + room.id + '] сжатие доски:', e.message);
+    // доску отдаём как было и уже без сжатия; придержанное — после неё
+    const held = ws.held || []; ws.held = null;
+    send(ws, { ...head, items: room.items.map(i => pt.wire(i)) });
+    // состояние могло уйти вперёд, пока сжимали: тогда придержанные правки
+    // уже есть в доске, и повтор их безвреден — add одного id клиент не
+    // дублирует, move и erase идемпотентны
+    for (const s of held) out(ws, s);
+  });
 }
 const peerInfo = c => ({ id: c.me.sid, name: c.me.name, cap: c.me.cap, color: c.me.color });
 
@@ -1472,12 +1544,8 @@ wss.on('connection', (ws, req) => {
         : (String(m.name || s.name || 'Гость').trim().slice(0, 24) || 'Гость');
 
       room.clients.add(ws); room.touched = Date.now();
-      // uid отдаём только самому себе: клиенту он нужен, чтобы понимать, какие
-      // объекты его собственные, а остальным участникам знать его незачем
-      send(ws, { t: 'init', you: { ...peerInfo(ws), uid: ws.me.uid },
-                 title: room.title, locked: room.locked, anyEdit: room.anyEdit,
-                 peers: [...room.clients].filter(c => c !== ws).map(peerInfo),
-                 items: room.items.map(i => pt.wire(i)) });
+      // z — клиент умеет распаковать gzip и просит доску сжатой
+      sendInit(ws, room, m.z === 'gzip');
       broadcast(room, { t: 'peer', peer: peerInfo(ws) }, ws);
       console.log('[' + room.id + '] + ' + ws.me.name + ' (' + cap + ') → ' + room.clients.size);
       return;

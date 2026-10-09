@@ -163,10 +163,15 @@ function trace(ctx,p,move){
   if(p.length>1)ctx.lineTo(p[p.length-1].x,p[p.length-1].y);
 }
 function outlinePath(ctx,s){
+  if(!s.pts.length)return;
+  ctx.beginPath();buildOutline(ctx,s);
+}
+/* Контур штриха — в ctx или в Path2D: методы построения у них общие. */
+function buildOutline(ctx,s){
   const pts=s.pts,n=pts.length; if(!n)return;
   const r=radii(s);
   if(n===1||(n===2&&Math.hypot(pts[1].x-pts[0].x,pts[1].y-pts[0].y)<0.1)){
-    ctx.beginPath();ctx.arc(pts[0].x,pts[0].y,Math.max(r[0],s.size*0.28),0,6.2832);return;
+    ctx.arc(pts[0].x,pts[0].y,Math.max(r[0],s.size*0.28),0,6.2832);return;
   }
   const L=[],R=[];
   for(let i=0;i<n;i++){
@@ -179,17 +184,36 @@ function outlinePath(ctx,s){
   const dir=(i0,i1)=>{const dx=pts[i1].x-pts[i0].x,dy=pts[i1].y-pts[i0].y,l=Math.hypot(dx,dy)||1;return{x:dx/l,y:dy/l};};
   const tE=dir(n-2,n-1),tS=dir(0,1);
   const nE={x:-tE.y,y:tE.x},nS={x:-tS.y,y:tS.x};
-  ctx.beginPath();
   trace(ctx,L,true);
   ctx.arc(pts[n-1].x,pts[n-1].y,r[n-1],Math.atan2(nE.y,nE.x),Math.atan2(-nE.y,-nE.x),true);
   trace(ctx,R.slice().reverse(),false);
   ctx.arc(pts[0].x,pts[0].y,r[0],Math.atan2(-nS.y,-nS.x),Math.atan2(nS.y,nS.x),true);
   ctx.closePath();
 }
+/* Готовый контур штриха, запомненный на самом штрихе.
+
+   Раньше контур — нажим, сужение концов, сглаживание — пересчитывался на
+   каждом кадре для каждого видимого штриха. На доске в 13 600 штрихов,
+   отдалённой так, что видно всё, это 0.12 с на кадр на ПК и почти полсекунды
+   на планшете: доска двигалась рывками. Контур зависит только от точек,
+   толщины и типа и не зависит от масштаба — поэтому запомненный рисуется
+   ровно так же, как пересчитанный.
+
+   Устаревает он сам: всё, что двигает, крутит или тянет штрих, — у себя, по
+   сети, при отмене — не правит точки на месте, а ставит новый массив, а
+   толщину меняют полем size. Сравнение с запомненным это и ловит. */
+function strokePath(s){
+  const c=s._path,pts=s.pts;
+  if(c&&c.pts===pts&&c.n===pts.length&&c.size===s.size&&c.type===s.type)return c.path;
+  const path=new Path2D();buildOutline(path,s);
+  s._path={pts,n:pts.length,size:s.size,type:s.type,path};
+  return path;
+}
 function paintStroke(ctx,s){
+  if(!s.pts.length)return;
   ctx.save();
   if(s.type==='marker'){ctx.globalAlpha=0.42;ctx.globalCompositeOperation='multiply';}
-  ctx.fillStyle=s.color; outlinePath(ctx,s); ctx.fill(); ctx.restore();
+  ctx.fillStyle=s.color; ctx.fill(strokePath(s)); ctx.restore();
 }
 
 /* Развешивание обработчиков и прочее, что делается при загрузке.
