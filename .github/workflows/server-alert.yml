@@ -1,0 +1,27 @@
+name: Тревога о нагрузке сервера в Telegram
+
+# Сервер доски сам следит за своей нагрузкой (scripts/server-alert.sh, cron
+# раз в минуту) и, когда процессор или память на пределе, просит GitHub
+# прислать сообщение — тем же путём, что и отчёт о занятиях: с сервера
+# Telegram не открывается, а отсюда — да. Текст целиком готовит сервер.
+on:
+  workflow_dispatch:
+    inputs:
+      text:
+        description: 'Текст сообщения'
+        required: true
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Отправить в Telegram
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # текст — только через переменную окружения, а не подстановкой в
+          # скрипт: так содержимое сообщения не может стать командой
+          TEXT: ${{ inputs.text }}
+        run: |
+          curl -sS --fail-with-body -o /dev/null -X POST "https://api.telegram.org/bot$TOKEN/sendMessage" \
+               --data-urlencode "chat_id=$CHAT" --data-urlencode "text=$TEXT"
