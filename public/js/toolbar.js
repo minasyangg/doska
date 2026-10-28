@@ -341,9 +341,11 @@ function setTool(t){
   document.getElementById('sensRow').classList.toggle('hidden',t!=='pen'&&t!=='marker');
   if(t!=='select'){select(null);clearMarquee();}
   if(t==='pen'||t==='marker'){
+    /* Каждому — своё, как настроили в прошлый раз. Раньше толщина была одна
+       на двоих и при переключении сбрасывалась на 18 у маркера и на 4 у пера:
+       подобранную толщину приходилось выставлять заново. */
     S.color=t==='marker'?S.markerColor:S.penColor;
-    if(t==='marker'&&S.size<12){S.size=18;sizeEl.value=18;}
-    if(t==='pen'&&S.size>12){S.size=4;sizeEl.value=4;}
+    S.size=t==='marker'?S.markerSize:S.penSize;sizeEl.value=S.size;
   }
   if(styled){
     sizeVal.textContent=S.size;renderInks();drawPreview();renderFills();updateDashButtons();
@@ -541,7 +543,11 @@ document.querySelectorAll('#moreMenu [data-extra]').forEach(b=>{
 renderPinnedTools();
 document.getElementById('a1Sel').onchange=e=>{S.a1=+e.target.value;applyStyleToSelection('a1',S.a1);};
 document.getElementById('a2Sel').onchange=e=>{S.a2=+e.target.value;applyStyleToSelection('a2',S.a2);};
-sizeEl.oninput=()=>{S.size=+sizeEl.value;sizeVal.textContent=S.size;drawPreview();applyStyleToSelection('size',S.size);};
+sizeEl.oninput=()=>{
+  S.size=+sizeEl.value;
+  if(S.tool==='marker')S.markerSize=S.size;else if(S.tool==='pen')S.penSize=S.size;
+  sizeVal.textContent=S.size;drawPreview();applyStyleToSelection('size',S.size);
+};
 
 /* Обе настройки запоминаются в браузере, а не на доске: это привычка руки
    конкретного человека, а не свойство занятия. */

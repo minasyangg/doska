@@ -47,7 +47,10 @@ const bctx=board.getContext('2d'), lctx=live.getContext('2d');
 const GRID_MODES=['grid','dots','lines','none'];
 const GRID_NAMES={grid:'клетка',dots:'точки',lines:'линейка',none:'чистый лист'};
 
+// у пера и маркера своя толщина, как и свой цвет: переключение не сбивает
+// ни то, ни другое (см. setTool)
 const S={tool:'pen',size:4,color:PENS[0],penColor:PENS[0],markerColor:MARKERS[0],
+  penSize:4,markerSize:18,
   cam:{x:0,y:0,z:1},grid:store.get('doska.grid')||'grid',
   // панель инструментов: закреплена или прячется у края
   dockPinned:store.get('doska.dockPinned')!=='0',
