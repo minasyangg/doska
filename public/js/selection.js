@@ -1,7 +1,7 @@
 /* что сейчас выделено, что тянут и что рисуют */
 
 import { S, byId, items, stage, toScreen } from './core.js';
-import { ARC_TYPES, BOX_TYPES, SELECTABLE, arcPt, arcSweep, bboxOf, rotAround } from './geometry.js';
+import { ARC_TYPES, BACK_TYPES, BOX_TYPES, SELECTABLE, arcPt, arcSweep, bboxOf, rotAround } from './geometry.js';
 import { graphAxisLabelPos, graphPointY } from './graph.js';
 import { hitTest } from './text.js';
 import { drawLive } from './render.js';
@@ -94,13 +94,20 @@ function itemsIn(rect){
   return out;
 }
 const inSelection=it=>selection.some(s=>s.id===it.id);
+/* Что под курсором — в порядке, обратном отрисовке: сначала то, что лежит
+   сверху. Картинки рисуются под записями (если их не подняли наверх, см.
+   flushBoard), а перебор по одному порядку добавления находил фото раньше
+   штриха, если фото вставили после записей, — щелчок по написанному на
+   фотографии выделял фотографию. */
+const underRest=it=>BACK_TYPES.has(it.type)&&!it.front;
 function itemAt(w){
   const r=6/S.cam.z; // небольшой экранно-постоянный допуск клика — точки штриха дискретны и могут быть реже, чем палец/клик
-  for(let i=items.length-1;i>=0;i--){
-    const it=items[i];
-    if(!SELECTABLE.has(it.type))continue;
-    if(hitTest(it,w,r))return it;
-  }
+  for(const back of [false,true])
+    for(let i=items.length-1;i>=0;i--){
+      const it=items[i];
+      if(!SELECTABLE.has(it.type)||underRest(it)!==back)continue;
+      if(hitTest(it,w,r))return it;
+    }
   return null;
 }
 /* хэндлы выделения в экранных координатах — 4 угла (resize) + 1 rotate-хэндл.
