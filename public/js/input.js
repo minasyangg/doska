@@ -151,10 +151,17 @@ function endPointer(e){
     const m=marquee;marquee=null;
     const rect={x0:Math.min(m.a.x,m.b.x),y0:Math.min(m.a.y,m.b.y),
                 x1:Math.max(m.a.x,m.b.x),y1:Math.max(m.a.y,m.b.y)};
+    const add=e.shiftKey||e.ctrlKey||e.metaKey;
     // короткий тычок — это снятие выделения, а не выбор всего под точкой;
-    // тычок по закреплённому объекту выделяет его самого
+    // тычок по закреплённому объекту выделяет его самого (с Shift —
+    // добавляет к выделенному или убирает из него)
     if(Math.max(rect.x1-rect.x0,rect.y1-rect.y0)*S.cam.z<4){
-      if(m.tap)selectMany(withGroup([m.tap]));
+      if(m.tap){
+        const g=withGroup([m.tap]);
+        if(!add)selectMany(g);
+        else if(inSelection(m.tap))selectMany(selection.filter(s=>!g.some(x=>x.id===s.id)));
+        else selectMany(selection.concat(g.filter(x=>!inSelection(x))));
+      }
     }else{
       let found=itemsIn(rect);
       // Закреплённое рамка не берёт, если в ней есть что-то ещё: обводят
@@ -162,7 +169,6 @@ function endPointer(e){
       // должно. Рамка вокруг одних закреплённых берёт их, как и раньше, —
       // чтобы открепить разом.
       if(found.some(it=>!it.locked))found=found.filter(it=>!it.locked);
-      const add=e.shiftKey||e.ctrlKey||e.metaKey;
       selectMany(add?selection.concat(found.filter(it=>!inSelection(it))):found);
       if(selection.length>1)hint('Выделено объектов: '+selection.length+' · тащите за любой из них');
     }
@@ -722,11 +728,12 @@ stage.addEventListener('pointerdown',e=>{
     /* Закреплённое не двигается, поэтому нажатие на нём начинает рамку: по
        закреплённой фотографии обводят написанное на ней. Раньше нажатие
        хватало саму фотографию — та не двигалась, а рамка так и не
-       начиналась, и выделить записи на фото было нельзя. Короткий тычок без
-       протяжки по-прежнему выделяет сам объект (см. endPointer) — иначе его
-       было бы не открепить. */
-    if(im&&im.locked&&!add&&mineOnly(im)&&canEdit()){
-      select(null);
+       начиналась, и выделить записи на фото было нельзя. С Shift/Ctrl рамка
+       добавляет к уже выделенному. Короткий тычок без протяжки по-прежнему
+       выделяет сам объект (с Shift — добавляет или убирает его, см.
+       endPointer) — иначе его было бы не открепить. */
+    if(im&&im.locked&&mineOnly(im)&&canEdit()){
+      if(!add)select(null);
       marquee={a:w,b:w,tap:im};refreshSelBar();drawLive();
       return;
     }
