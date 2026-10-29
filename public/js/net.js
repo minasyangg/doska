@@ -1,6 +1,6 @@
 /* WebSocket и (де)сериализация объектов */
 
-import { S, board, byId, items, mkStroke, resetContent } from './core.js';
+import { S, api, board, byId, items, mkStroke, resetContent } from './core.js';
 import { bboxOf } from './geometry.js';
 import { applyRole, deniedScreen, hint, renderPeers, setConn, setTitle } from './shell.js';
 import { clearSelected, inSelection, refreshSelBar, select, updateSelBar } from './selection.js';
@@ -62,11 +62,26 @@ const net={
       const z=typeof DecompressionStream==='function'&&!this.noZ?'gzip':undefined;
       ws.send(JSON.stringify({t:'join',room:S.boardId,name:S.name,z}));};
     ws.onmessage=e=>this.recv(ws,e.data);
-    ws.onclose=ev=>{
+    ws.onclose=async ev=>{
       if(ev.code===4004){hideBoardLoader();setConn('off','Доска удалена');return;}
       if(ev.code===4003){hideBoardLoader();setConn('off','Доступ к доске закрыт');deniedScreen();return;}
-      // 401 на рукопожатии приходит как обычное закрытие: сессии нет — на вход
-      if(ev.code===1006&&!S.you){hideBoardLoader();nav('/login?next='+encodeURIComponent(location.pathname));return;}
+      /* 1006 — обрыв без кадра закрытия. Так браузер показывает и отказ
+         сервера на рукопожатии (сессии нет — 401, сам код ответа странице не
+         виден), и обычный обрыв: пропала сеть, телефон усыпил вкладку,
+         сервер перезапустили при выкладке.
+
+         Раньше при 1006 всех без учётной записи сразу уводили на вход. Но
+         без учётной записи и все гости по ссылке: любой перебой связи
+         выкидывал ученика на страницу входа, посреди занятия. Теперь
+         спрашиваем сервер, жива ли сессия: жива — переподключаемся как все,
+         нет — заново проходим вход на эту доску (гостю — окно «войти как
+         гость» с его же именем, если доска пускает гостей). */
+      if(ev.code===1006&&!S.you&&await this.sessionGone()){
+        if(ws!==this.ws)return;          // пока спрашивали, ушли с доски
+        this.ws=null;hideBoardLoader();
+        nav(location.pathname);return;
+      }
+      if(ws!==this.ws)return;
       setConn('off','Связь потеряна, переподключаюсь…');
       // Обрыв посреди уже загруженного занятия — накрываем прелоадером снова,
       // пока идёт первый вход, он и так на экране с самого openBoard().
@@ -76,6 +91,14 @@ const net={
     ws.onerror=()=>{};
   },
   close(){if(this.ws){this.ws.onclose=null;this.ws.close();this.ws=null;}this.pend=null;hideBoardLoader();},
+  /** Сессии на эту доску больше нет? Нет ответа от сервера (сеть, перезапуск)
+      — это ещё не «нет сессии»: тогда просто переподключаемся. */
+  async sessionGone(){
+    try{
+      const me=await api('/auth/me');
+      return !(me&&(me.user||(me.guest&&me.guest.boardId===S.boardId)));
+    }catch(e){return e.status===401;}
+  },
   send(o){if(this.ws&&this.ws.readyState===1)this.ws.send(JSON.stringify(o));},
 
   /* Доска при входе приходит сжатой: 'init' без объектов и следом двоичный
