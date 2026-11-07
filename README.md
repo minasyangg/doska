@@ -46,9 +46,9 @@ lib/capability.js  кто что может делать с доской
 lib/metrics.js     счётчики для Prometheus
 public/index.html  разметка страницы и стили
 public/js/main.js  точка входа: подключает модули в исходном порядке
-public/js/*.js     клиент по частям: core, geometry, shapes, physics, graph,
-                   text, render, net, input, graph-ui, undo, toolbar, menu,
-                   boards, app
+public/js/*.js     клиент по частям: core, geometry, shapes, physics, models,
+                   graph, text, render, net, input, graph-ui, undo, toolbar,
+                   menu, boards, app
 scripts/load-test.js  нагрузка: N ботов в одной доске, замер потолка
 scripts/check-client.js  прогон клиента без браузера (npm run check)
 scripts/lib-import-writes.js  запись в ввезённое имя — ищется по тексту

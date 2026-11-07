@@ -569,6 +569,19 @@
       <input type="range" id="physLabelSize" min="9" max="22" step="1" value="13">
     </div>
   </div>
+  <!-- модели, как и график, настраиваются уже на доске: панель правит
+       выделенный объект, а не черновик (см. renderModelPanel) -->
+  <div id="physicsModelRow" class="hidden">
+    <div id="physicsModelFields"></div>
+    <label id="physModelFixedRow" style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);margin-top:11px;cursor:pointer">
+      <input type="checkbox" id="physModelFixed" style="width:16px;height:16px;accent-color:#fff">
+      Поршень закреплён
+    </label>
+    <div id="physModelClock" style="display:flex;gap:6px;margin-top:11px">
+      <button class="mini" id="physModelRun" style="background:var(--panel-2);flex:1">▶ Пуск</button>
+      <button class="mini" id="physModelReset" title="Вернуть в начальное положение" style="background:var(--panel-2);flex:1">⟲ Сначала</button>
+    </div>
+  </div>
   <div class="label" id="physicsPlaceHint" style="margin-top:9px;font-size:11.5px">Кликните по доске, чтобы поставить.</div>
 </div>
 

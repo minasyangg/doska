@@ -9,6 +9,7 @@ import { angleAt, canEdit, eraserR, handleAt, inSelection, itemAt, itemsIn, loca
 import { applyCursor, camChanged, drawBoard, drawLive, handleCursor, zoomAt } from './render.js';
 import { addItem, deflate, net, removeItem } from './net.js';
 import { renderGraphExpressions, renderGraphParams } from './graph-ui.js';
+import { MODELS, modelDefaults, renderModelPanel } from './models.js';
 import { pushUndo } from './undo.js';
 import { setTool } from './toolbar.js';
 import { openMenu, withGroup } from './menu.js';
@@ -480,9 +481,11 @@ async function placeImage(blob,screenPt){
    берутся из черновика S.physicsProps, а не задаются задним числом. */
 const PHYSICS_SIZE={magnet:{w:96,h:34},compass:{w:64,h:64},
   'light-source':{w:40,h:40},lens:{w:14,h:110},mirror:{w:14,h:130},
-  heater:{w:56,h:44},body:{w:90,h:70},calorimeter:{w:180,h:140},graph:{w:280,h:220}};
+  heater:{w:56,h:44},body:{w:90,h:70},calorimeter:{w:180,h:140},graph:{w:280,h:220},
+  pendulum:{w:280,h:330},spring:{w:280,h:330},wave:{w:400,h:240},cylinder:{w:330,h:340}};
 const PHYSICS_TITLE={magnet:'Магнит',compass:'Компас','light-source':'Источник луча',lens:'Линза',mirror:'Зеркало',
-  heater:'Нагреватель',body:'Тело',calorimeter:'Калориметр',graph:'График'};
+  heater:'Нагреватель',body:'Тело',calorimeter:'Калориметр',graph:'График',
+  pendulum:'Математический маятник',spring:'Пружинный маятник',wave:'Волна',cylinder:'Цилиндр с поршнем'};
 function placePhysics(kind,w){
   if(!canEdit())return hint('Преподаватель закрыл доску для правок');
   const size=PHYSICS_SIZE[kind]||{w:60,h:60};
@@ -495,6 +498,7 @@ function placePhysics(kind,w){
     :kind==='graph'?{view:{cx:0,cy:0,scale:40},
                       expressions:[{id:newId(),text:'',color:GRAPH_COLORS[0],visible:true,fill:false}],
                       points:[],xLabel:'x',yLabel:'y',angleMode:'rad',params:[],labelSize:13}
+    :MODELS[kind]?modelDefaults(kind)
     :{};
   const it={id:newId(),by:S.me&&S.me.uid,type:'physics',kind,
             x:w.x-size.w/2,y:w.y-size.h/2,w:size.w,h:size.h,rot:0,locked:false,props};
@@ -521,11 +525,13 @@ function placePhysics(kind,w){
 function updatePhysicsPanel(){
   const panel=document.getElementById('physicsPanel');
   const editingGraph=S.tool==='select'&&selected&&selected.type==='physics'&&selected.kind==='graph';
+  // модели настраиваются так же, как график: уже стоя на доске
+  const editingModel=S.tool==='select'&&selected&&selected.type==='physics'&&!!MODELS[selected.kind];
   const placing=S.tool==='physics'&&!!S.physicsKind;
-  const on=(placing||editingGraph)&&!!S.boardId;
+  const on=(placing||editingGraph||editingModel)&&!!S.boardId;
   panel.classList.toggle('hidden',!on);
   if(!on)return;
-  const kind=editingGraph?'graph':S.physicsKind;
+  const kind=editingGraph?'graph':editingModel?selected.kind:S.physicsKind;
   const title=kind==='lens'?(PHYSICS_TITLE.lens+' ('+((S.physicsSign||1)>0?'собирающая':'рассеивающая')+')')
                             :(PHYSICS_TITLE[kind]||'Объект');
   document.getElementById('physicsPanelTitle').textContent=title;
@@ -535,7 +541,9 @@ function updatePhysicsPanel(){
   document.getElementById('physicsHeaterRow').classList.toggle('hidden',kind!=='heater');
   document.getElementById('physicsBodyRow').classList.toggle('hidden',kind!=='body');
   document.getElementById('physicsGraphRow').classList.toggle('hidden',kind!=='graph');
-  document.getElementById('physicsPlaceHint').classList.toggle('hidden',kind==='graph');
+  document.getElementById('physicsModelRow').classList.toggle('hidden',!editingModel);
+  document.getElementById('physicsPlaceHint').classList.toggle('hidden',kind==='graph'||editingModel);
+  if(editingModel){renderModelPanel(selected);return;}
   if(kind==='graph'){
     renderGraphExpressions();
     document.getElementById('physicsGraphPostOnly').classList.toggle('hidden',!editingGraph);
@@ -1203,7 +1211,7 @@ stage.addEventListener('wheel',e=>{
 
 /* ═══════════════════ вставка картинок ═══════════════════ */
 document.getElementById('physicsPanelClose').onclick=()=>{
-  if(selected&&selected.type==='physics'&&selected.kind==='graph')select(null);
+  if(selected&&selected.type==='physics'&&(selected.kind==='graph'||MODELS[selected.kind]))select(null);
   else setTool('select');
 };
 document.getElementById('physShowField').onchange=e=>{S.physicsProps.magnet.showField=e.target.checked;};

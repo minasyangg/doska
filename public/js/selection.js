@@ -3,6 +3,7 @@
 import { S, byId, items, stage, toScreen } from './core.js';
 import { ARC_TYPES, BACK_TYPES, BOX_TYPES, SELECTABLE, arcPt, arcSweep, bboxOf, rotAround } from './geometry.js';
 import { graphAxisLabelPos, graphPointY } from './graph.js';
+import { MODELS } from './models.js';
 import { hitTest } from './text.js';
 import { drawLive } from './render.js';
 import { dragging, hoverHandleCursor, marquee, updatePhysicsPanel } from './input.js';
@@ -157,8 +158,9 @@ function handlesFor(it){
   const midS=toScreen(midW.x,midW.y);
   const ux=Math.sin(rot),uy=-Math.cos(rot);
   // у графика поворот бессмысленен (координатная плоскость всегда прямая) —
-  // ручки вращения у него нет, только обычный ресайз рамки по углам/сторонам
-  if(!(it.type==='physics'&&it.kind==='graph'))
+  // ручки вращения у него нет, только обычный ресайз рамки по углам/сторонам.
+  // То же у моделей: сила тяжести у маятника и поршня всегда направлена вниз
+  if(!(it.type==='physics'&&(it.kind==='graph'||MODELS[it.kind])))
     handles.push({name:'rot',kind:'rotate',sx:midS.x+ux*24,sy:midS.y+uy*24});
   // отдельные вершины линии/полигона — редактируются независимо от rotate/resize
   if(it.type==='path'){

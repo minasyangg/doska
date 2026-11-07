@@ -1095,7 +1095,8 @@ const gzip = (buf) => new Promise((ok, no) =>
 function initHead(ws, room) {
   // uid отдаём только самому себе: клиенту он нужен, чтобы понимать, какие
   // объекты его собственные, а остальным участникам знать его незачем
-  return { t: 'init', you: { ...peerInfo(ws), uid: ws.me.uid },
+  // now — часы сервера: по ним у всех участников совпадает движение моделей
+  return { t: 'init', you: { ...peerInfo(ws), uid: ws.me.uid }, now: Date.now(),
            title: room.title, locked: room.locked, anyEdit: room.anyEdit,
            peers: [...room.clients].filter(c => c !== ws).map(peerInfo) };
 }
@@ -1275,10 +1276,28 @@ function cleanPath(p, by) {
 // парсит и считает клиент своим кодом (см. graphParse в index.html), а не
 // eval/new Function — сервер её не выполняет и не проверяет на валидность,
 // только на размер.
-const PHYSICS_KINDS = new Set(['magnet', 'compass', 'light-source', 'lens', 'mirror', 'heater', 'body', 'calorimeter', 'graph']);
+const PHYSICS_KINDS = new Set(['magnet', 'compass', 'light-source', 'lens', 'mirror', 'heater', 'body', 'calorimeter', 'graph',
+                               'pendulum', 'spring', 'wave', 'cylinder']);
 const BODY_MATERIALS = new Set(['water', 'copper', 'aluminum', 'lead', 'steel']);
+// модели: поле → [мин, макс, по умолчанию], зеркало MODELS в public/js/models.js
+const MODEL_RANGES = {
+  pendulum: { len: [0.2, 2.5, 1], g: [1.6, 25, 9.8], amp: [1, 30, 15], mass: [0.1, 2, 0.5] },
+  spring: { k: [5, 200, 20], mass: [0.05, 2, 0.5], amp: [1, 10, 5] },
+  wave: { lambda: [0.5, 3, 2], period: [0.5, 5, 2], amp: [0.1, 1, 0.5] },
+  cylinder: { T: [100, 1000, 300], n: [0.05, 1, 0.2], mass: [0, 50, 0], fric: [0, 500, 0],
+              p0: [0, 200, 100], h: [0.05, 1, 0.5] },
+};
 function cleanPhysicsProps(kind, props) {
   const p = props && typeof props === 'object' ? props : {};
+  if (MODEL_RANGES[kind]) {
+    const out = {};
+    for (const [k, [lo, hi, def]] of Object.entries(MODEL_RANGES[kind]))
+      out[k] = Math.max(lo, Math.min(hi, Number.isFinite(+p[k]) ? +p[k] : def));
+    if (kind === 'cylinder') return { ...out, fixed: !!p.fixed };
+    // ph и at — фаза колебаний и момент по часам сервера, см. models.js
+    return { ...out, run: !!p.run,
+             ph: Number.isFinite(+p.ph) ? +p.ph : 0, at: Number.isFinite(+p.at) ? +p.at : 0 };
+  }
   if (kind === 'magnet') {
     const s = Number.isFinite(+p.strength) ? +p.strength : 1;
     // строгих Тесла тут нет — школьная модель условна, но подписана в Тл на панели

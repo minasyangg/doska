@@ -4,6 +4,7 @@ import { S, api, board, byId, items, mkStroke, resetContent } from './core.js';
 import { bboxOf } from './geometry.js';
 import { applyRole, deniedScreen, hint, renderPeers, setConn, setTitle } from './shell.js';
 import { clearSelected, inSelection, refreshSelBar, select, updateSelBar } from './selection.js';
+import { syncModelPanel } from './models.js';
 import { cursors, drawBoard, drawLive, peerViews, peers, remoteLive } from './render.js';
 import { dropFromSelection } from './undo.js';
 import { applyZ } from './menu.js';
@@ -116,6 +117,9 @@ const net={
     }
     if(typeof data!=='string')return;
     let m;try{m=JSON.parse(data);}catch{return;}
+    // сверяем часы здесь, а не в on(): сжатая доска попадёт туда только после
+    // распаковки, и на тяжёлой доске поправка вышла бы на эту распаковку больше
+    if(m.t==='init'&&m.now)S.clock=m.now-Date.now();
     if(m.t==='init'&&m.z){p.head=performance.now();p.z=1;this.pendHead=m;this.pend=[];return;}
     if(m.t==='init'&&!p.sent){p.head=p.data=performance.now();p.bytes=data.length;p.z=0;}
     try{this.on(m);}catch{}
@@ -226,6 +230,7 @@ const net={
           }
           it.bbox=bboxOf(it);
           if(inSelection(it))updateSelBar();
+          if('props' in m)syncModelPanel(it);
           drawBoard();drawLive();
         }
         break;
