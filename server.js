@@ -1576,6 +1576,7 @@ wss.on('connection', (ws, req) => {
     const owner = ws.me.cap === 'owner';
     const mayEdit = cap_.mayEdit(ws.me.cap, room.locked);
     const mine = it => owner || room.anyEdit || (it.by != null && it.by === ws.me.uid);
+    noteActivity(room, ws, m);
 
     switch (m.t) {
       /* Сводка от браузера: за сколько у человека открылась доска и на что
@@ -1794,6 +1795,40 @@ setInterval(() => {
   }
 }, 25000);
 
+/* ═══════ кто что делал на доске ═══════
+
+   Открытая вкладка — ещё не занятие. 5 ноября учитель и ученик не закрыли
+   вкладки после урока, и отчёт насчитал занятие до глубокой ночи, а следующим
+   днём — ещё одно, которого не было. Поэтому раз в минуту в журнал уходит
+   строка о том, кто за эту минуту что-то делал:
+     [доска] действия {"Имя":[правки, движения]}
+   Правки — изменения содержимого, движения — курсор и камера. Минут без
+   действий в журнале нет вовсе. Читает это scripts/day-report.js.
+
+   Считаем только то, за чем стоит человек. Сами по себе сообщения шлют две
+   вещи: тело у нагревателя ('move' с props раз в секунду, см. thermalTick) —
+   с забытой вкладки это шло бы всю ночь, — и первая область экрана при входе
+   (sendPresence в 'init'): вкладка переподключается и без человека. */
+const BOARD_EDITS = new Set(['add', 'move', 'erase', 'restore', 'z', 'clear']);
+function noteActivity(room, ws, m) {
+  const edit = BOARD_EDITS.has(m.t);
+  if (!edit && m.t !== 'cursor' && m.t !== 'presence') return;
+  if (m.t === 'presence' && !ws.framed) { ws.framed = true; return; }
+  if (m.t === 'move' && 'props' in m && (room.byId.get(m.id) || {}).kind === 'body') return;
+  const acts = room.acts || (room.acts = new Map());
+  const a = acts.get(ws.me.name) || [0, 0];
+  a[edit ? 0 : 1]++;
+  acts.set(ws.me.name, a);
+}
+function flushActivity() {
+  for (const room of rooms.values()) {
+    if (!room.acts || !room.acts.size) continue;
+    console.log('[' + room.id + '] действия ' + JSON.stringify(Object.fromEntries(room.acts)));
+    room.acts.clear();
+  }
+}
+setInterval(flushActivity, 60000);
+
 /* ═══════ курсоры и области — одной пачкой на комнату ═══════
 
    Замер (scripts/load-test.js) показал, где именно упирается доска, и это
@@ -1880,6 +1915,7 @@ let leaving = false;
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, async () => {
   if (leaving) return;
   leaving = true;
+  flushActivity();
   try {
     await Promise.all([...rooms.values()].map(r => store.closeRoom(r.id, r)));
     console.log('\nсохранено, выход');
