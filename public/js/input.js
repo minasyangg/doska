@@ -481,7 +481,7 @@ async function placeImage(blob,screenPt){
    берутся из черновика S.physicsProps, а не задаются задним числом. */
 const PHYSICS_SIZE={magnet:{w:96,h:34},compass:{w:64,h:64},
   'light-source':{w:40,h:40},lens:{w:14,h:110},mirror:{w:14,h:130},
-  heater:{w:56,h:44},body:{w:90,h:70},calorimeter:{w:180,h:140},graph:{w:280,h:220},
+  heater:{w:240,h:190},body:{w:270,h:340},calorimeter:{w:400,h:300},graph:{w:280,h:220},
   pendulum:{w:280,h:330},spring:{w:280,h:330},wave:{w:400,h:240},cylinder:{w:330,h:340}};
 const PHYSICS_TITLE={magnet:'Магнит',compass:'Компас','light-source':'Источник луча',lens:'Линза',mirror:'Зеркало',
   heater:'Нагреватель',body:'Тело',calorimeter:'Калориметр',graph:'График',
@@ -492,9 +492,6 @@ function placePhysics(kind,w){
   const props=kind==='magnet'?{...S.physicsProps.magnet}
     :kind==='light-source'?{...S.physicsProps['light-source']}
     :kind==='lens'?{focal:(S.physicsSign||1)*Math.abs(S.physicsProps.lens.focal)}
-    :kind==='heater'?{...S.physicsProps.heater}
-    :kind==='body'?{material:S.physicsProps.body.material,mass:S.physicsProps.body.mass,
-                    energyJoules:0,elapsedSeconds:0,started:false}
     :kind==='graph'?{view:{cx:0,cy:0,scale:40},
                       expressions:[{id:newId(),text:'',color:GRAPH_COLORS[0],visible:true,fill:false}],
                       points:[],xLabel:'x',yLabel:'y',angleMode:'rad',params:[],labelSize:13}
@@ -538,8 +535,6 @@ function updatePhysicsPanel(){
   document.getElementById('physicsMagnetRow').classList.toggle('hidden',kind!=='magnet');
   document.getElementById('physicsSourceRow').classList.toggle('hidden',kind!=='light-source');
   document.getElementById('physicsLensRow').classList.toggle('hidden',kind!=='lens');
-  document.getElementById('physicsHeaterRow').classList.toggle('hidden',kind!=='heater');
-  document.getElementById('physicsBodyRow').classList.toggle('hidden',kind!=='body');
   document.getElementById('physicsGraphRow').classList.toggle('hidden',kind!=='graph');
   document.getElementById('physicsModelRow').classList.toggle('hidden',!editingModel);
   document.getElementById('physicsPlaceHint').classList.toggle('hidden',kind==='graph'||editingModel);
@@ -570,14 +565,6 @@ function updatePhysicsPanel(){
   }else if(kind==='lens'){
     document.getElementById('physFocal').value=S.physicsProps.lens.focal;
     document.getElementById('physFocalVal').textContent=Math.round(S.physicsProps.lens.focal);
-  }else if(kind==='heater'){
-    document.getElementById('physPower').value=S.physicsProps.heater.power;
-    document.getElementById('physPowerVal').textContent=Math.round(S.physicsProps.heater.power);
-  }else if(kind==='body'){
-    const p=S.physicsProps.body;
-    document.getElementById('physMaterial').value=p.material;
-    document.getElementById('physMass').value=p.mass*1000;
-    document.getElementById('physMassVal').textContent=Math.round(p.mass*1000);
   }
 }
 
@@ -1234,17 +1221,6 @@ document.getElementById('physFocal').oninput=e=>{
   const v=+e.target.value;
   S.physicsProps.lens.focal=v;
   document.getElementById('physFocalVal').textContent=Math.round(v);
-};
-document.getElementById('physPower').oninput=e=>{
-  const v=+e.target.value;
-  S.physicsProps.heater.power=v;
-  document.getElementById('physPowerVal').textContent=Math.round(v);
-};
-document.getElementById('physMaterial').onchange=e=>{S.physicsProps.body.material=e.target.value;};
-document.getElementById('physMass').oninput=e=>{
-  const g=+e.target.value;
-  S.physicsProps.body.mass=g/1000;
-  document.getElementById('physMassVal').textContent=Math.round(g);
 };
 
 }

@@ -1269,16 +1269,15 @@ function cleanPath(p, by) {
    этим координатам, серверу знать её не нужно. */
 // оптика (источник/линза/зеркало) — та же геометрия x,y,w,h,rot, что и у
 // магнита/компаса, лучи и преломление считает клиент по этим координатам
-// тепловые (нагреватель/тело/калориметр) и график — те, у кого props
-// меняются уже после постановки (energyJoules у тела растёт, пока рядом
-// греет нагреватель; вид и список формул графика правятся постоянно),
-// см. PATCH_CLAMP.physics.props ниже. Сама формула — просто строка: её
+// у моделей и графика props меняются уже после постановки (см.
+// PATCH_CLAMP.physics.props ниже). Сама формула — просто строка: её
 // парсит и считает клиент своим кодом (см. graphParse в index.html), а не
 // eval/new Function — сервер её не выполняет и не проверяет на валидность,
 // только на размер.
 const PHYSICS_KINDS = new Set(['magnet', 'compass', 'light-source', 'lens', 'mirror', 'heater', 'body', 'calorimeter', 'graph',
                                'pendulum', 'spring', 'wave', 'cylinder']);
 const BODY_MATERIALS = new Set(['water', 'copper', 'aluminum', 'lead', 'steel']);
+const material = v => BODY_MATERIALS.has(v) ? v : 'water';
 // модели: поле → [мин, макс, по умолчанию], зеркало MODELS в public/js/models.js
 const MODEL_RANGES = {
   pendulum: { len: [0.2, 2.5, 1], g: [1.6, 25, 9.8], amp: [1, 30, 15], mass: [0.1, 2, 0.5] },
@@ -1286,6 +1285,9 @@ const MODEL_RANGES = {
   wave: { lambda: [0.5, 3, 2], period: [0.5, 5, 2], amp: [0.1, 1, 0.5] },
   cylinder: { T: [100, 1000, 300], n: [0.05, 1, 0.2], mass: [0, 50, 0], fric: [0, 500, 0],
               p0: [0, 200, 100], h: [0.05, 1, 0.5] },
+  heater: { power: [50, 5000, 500] },
+  body: { mass: [0.01, 1, 0.1], t0: [-30, 1700, 20], q: [0, 1e9, 0], watts: [0, 100000, 0] },
+  calorimeter: { m1: [10, 1000, 200], t1: [-30, 500, 20], m2: [10, 1000, 100], t2: [-30, 500, 100] },
 };
 function cleanPhysicsProps(kind, props) {
   const p = props && typeof props === 'object' ? props : {};
@@ -1293,10 +1295,13 @@ function cleanPhysicsProps(kind, props) {
     const out = {};
     for (const [k, [lo, hi, def]] of Object.entries(MODEL_RANGES[kind]))
       out[k] = Math.max(lo, Math.min(hi, Number.isFinite(+p[k]) ? +p[k] : def));
+    const at = Number.isFinite(+p.at) ? +p.at : 0;
     if (kind === 'cylinder') return { ...out, fixed: !!p.fixed };
+    if (kind === 'heater') return { ...out, on: !!p.on };
+    if (kind === 'body') return { ...out, material: material(p.material), at };
+    if (kind === 'calorimeter') return { ...out, mat1: material(p.mat1), mat2: material(p.mat2), run: !!p.run, at };
     // ph и at — фаза колебаний и момент по часам сервера, см. models.js
-    return { ...out, run: !!p.run,
-             ph: Number.isFinite(+p.ph) ? +p.ph : 0, at: Number.isFinite(+p.at) ? +p.at : 0 };
+    return { ...out, run: !!p.run, ph: Number.isFinite(+p.ph) ? +p.ph : 0, at };
   }
   if (kind === 'magnet') {
     const s = Number.isFinite(+p.strength) ? +p.strength : 1;
@@ -1313,23 +1318,6 @@ function cleanPhysicsProps(kind, props) {
     // знак — собирающая/рассеивающая, зажимаем модуль, знак не трогаем
     const sign = f < 0 ? -1 : 1;
     return { focal: sign * Math.max(60, Math.min(400, Math.abs(f))) };
-  }
-  if (kind === 'heater') {
-    const pw = Number.isFinite(+p.power) ? +p.power : 500;
-    return { power: Math.max(10, Math.min(5000, pw)) };
-  }
-  if (kind === 'body') {
-    const mat = BODY_MATERIALS.has(p.material) ? p.material : 'water';
-    const mass = Number.isFinite(+p.mass) ? +p.mass : 0.1;
-    const energy = Number.isFinite(+p.energyJoules) ? +p.energyJoules : 0;
-    const elapsed = Number.isFinite(+p.elapsedSeconds) ? +p.elapsedSeconds : 0;
-    return {
-      material: mat,
-      mass: Math.max(0.001, Math.min(50, mass)),
-      energyJoules: Math.max(0, Math.min(1e9, energy)),
-      elapsedSeconds: Math.max(0, Math.min(1e7, elapsed)),
-      started: !!p.started,
-    };
   }
   if (kind === 'graph') {
     const v = p.view && typeof p.view === 'object' ? p.view : {};
@@ -1449,10 +1437,8 @@ const PATCH_CLAMP = {
     locked: (v) => !!v
   },
   // kind не патчится — вид объекта задаётся один раз при постановке. props
-  // патчится (через тот же cleanPhysicsProps, что и при 'add') — нужно телу:
-  // energyJoules/elapsedSeconds растут, пока рядом греет нагреватель, и это
-  // единственный физический объект, чьи параметры вообще меняются во
-  // времени, а не только руками через панель при постановке.
+  // патчится (через тот же cleanPhysicsProps, что и при 'add') — так работают
+  // настройки моделей и графика, которые правят уже стоящий объект.
   physics: {
     g: clampG,
     x: (v, it) => Number.isFinite(+v) ? +v : it.x,
@@ -1805,16 +1791,14 @@ setInterval(() => {
    Правки — изменения содержимого, движения — курсор и камера. Минут без
    действий в журнале нет вовсе. Читает это scripts/day-report.js.
 
-   Считаем только то, за чем стоит человек. Сами по себе сообщения шлют две
-   вещи: тело у нагревателя ('move' с props раз в секунду, см. thermalTick) —
-   с забытой вкладки это шло бы всю ночь, — и первая область экрана при входе
-   (sendPresence в 'init'): вкладка переподключается и без человека. */
+   Считаем только то, за чем стоит человек. Сама по себе приходит первая
+   область экрана при входе (sendPresence в 'init'): вкладка переподключается
+   и без человека. */
 const BOARD_EDITS = new Set(['add', 'move', 'erase', 'restore', 'z', 'clear']);
 function noteActivity(room, ws, m) {
   const edit = BOARD_EDITS.has(m.t);
   if (!edit && m.t !== 'cursor' && m.t !== 'presence') return;
   if (m.t === 'presence' && !ws.framed) { ws.framed = true; return; }
-  if (m.t === 'move' && 'props' in m && (room.byId.get(m.id) || {}).kind === 'body') return;
   const acts = room.acts || (room.acts = new Map());
   const a = acts.get(ws.me.name) || [0, 0];
   a[edit ? 0 : 1]++;

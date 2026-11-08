@@ -535,22 +535,6 @@
     <div class="label" style="margin-bottom:5px">Фокусное расстояние <span id="physFocalVal" style="color:var(--text)">140</span></div>
     <input type="range" id="physFocal" min="60" max="400" step="10" value="140">
   </div>
-  <div id="physicsHeaterRow" class="hidden">
-    <div class="label" style="margin-bottom:5px">Мощность <span id="physPowerVal" style="color:var(--text)">500</span> Вт</div>
-    <input type="range" id="physPower" min="50" max="3000" step="50" value="500">
-  </div>
-  <div id="physicsBodyRow" class="hidden">
-    <div class="label" style="margin-bottom:5px">Вещество</div>
-    <select id="physMaterial" style="width:100%;background:var(--panel-2);color:var(--text);border:1px solid var(--edge);border-radius:6px;padding:6px;margin-bottom:9px">
-      <option value="water">Вода / лёд</option>
-      <option value="copper">Медь</option>
-      <option value="aluminum">Алюминий</option>
-      <option value="lead">Свинец</option>
-      <option value="steel">Сталь</option>
-    </select>
-    <div class="label" style="margin-bottom:5px">Масса <span id="physMassVal" style="color:var(--text)">100</span> г</div>
-    <input type="range" id="physMass" min="10" max="1000" step="10" value="100">
-  </div>
   <!-- у графика нет настроек до постановки — список функций появляется
        после, когда объект уже выделен на доске (см. renderGraphExpressions) -->
   <div id="physicsGraphRow" class="hidden">

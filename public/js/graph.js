@@ -3,7 +3,7 @@
 import { S, toScreen, toWorld } from './core.js';
 import { arcSweep } from './geometry.js';
 import { drawAxisArrow } from './shapes.js';
-import { compassAngle, paintBody, paintCalorimeter, paintFieldLines, paintHeater, paintLens, paintMirror, paintSource } from './physics.js';
+import { compassAngle, paintFieldLines, paintLens, paintMirror, paintSource } from './physics.js';
 import { MODELS, paintModel } from './models.js';
 import { itemAt } from './selection.js';
 import { dragging, hoverPt } from './input.js';
@@ -624,10 +624,7 @@ function paintPhysics(ctx,it){
   if(it.kind==='light-source'){paintSource(ctx,it);return;}
   if(it.kind==='lens'){paintLens(ctx,it);return;}
   if(it.kind==='mirror'){paintMirror(ctx,it);return;}
-  if(it.kind==='heater'){paintHeater(ctx,it);return;}
-  if(it.kind==='body'){paintBody(ctx,it);return;}
   if(it.kind==='graph'){paintGraph(ctx,it);return;}
-  if(it.kind==='calorimeter'){paintCalorimeter(ctx,it);return;}
   if(it.kind==='magnet'){
     if(!it.props||it.props.showField!==false)paintFieldLines(ctx,it);
     ctx.save();ctx.translate(cx,cy);ctx.rotate(rot);

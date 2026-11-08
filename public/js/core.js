@@ -75,8 +75,6 @@ const S={tool:'pen',size:4,color:PENS[0],penColor:PENS[0],markerColor:MARKERS[0]
     magnet:{strength:1,showField:true},
     'light-source':{rayCount:5,spreadDeg:16},
     lens:{focal:140},
-    heater:{power:500},
-    body:{material:'water',mass:0.1},
   },
   // знак фокусного расстояния линзы — задаётся выбором инструмента
   // (Собирающая/Рассеивающая), а не самой панелью: там правится только

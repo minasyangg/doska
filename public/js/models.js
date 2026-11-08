@@ -7,8 +7,10 @@ import { hint } from './shell.js';
 import { canEdit, selected } from './selection.js';
 import { drawBoard } from './render.js';
 import { net } from './net.js';
+import { bodyField, bodyHeating, bodyInit, bodyReset, bodyTempMax, materialOptions, mixBusy, mixField, mixInit, mixToggle,
+         paintBody, paintCalorimeter, paintHeater } from './thermal.js';
 
-/* ═══ модели из «Общих инструментов» ═══
+/* ═══ модели разделов «Механика» и «Тепловые явления» ═══
    Тот же тип items 'physics', что у магнита и линз, но здесь у объекта есть
    настоящее движение, а смотрят на него сразу несколько человек. Учитель
    говорит «смотрите, груз в крайней точке» — и у ученика он должен быть там
@@ -40,23 +42,23 @@ const MODELS={
   /* Формула T=2π√(l/g) и гармоническое движение верны для малых углов,
      поэтому амплитуда ограничена 30°: там настоящий период длиннее всего на
      1,7%, а показанное T совпадает с тем, что видно на доске. */
-  pendulum:{paint:paintPendulum,omega:p=>Math.sqrt(p.g/p.len),fields:[
+  pendulum:{paint:paintPendulum,init:clockInit,omega:p=>Math.sqrt(p.g/p.len),fields:[
     {key:'len',label:'Длина нити',unit:'м',min:0.2,max:LEN_MAX,step:0.05,def:1,d:2},
     {key:'g',label:'Ускорение свободного падения',unit:'м/с²',min:1.6,max:25,step:0.1,def:G,d:1},
     {key:'amp',label:'Амплитуда',unit:'°',min:1,max:AMP_MAX,step:1,def:15,d:0},
     {key:'mass',label:'Масса груза',unit:'кг',min:0.1,max:2,step:0.1,def:0.5,d:1},
   ]},
-  spring:{paint:paintSpring,omega:p=>Math.sqrt(p.k/p.mass),fields:[
+  spring:{paint:paintSpring,init:clockInit,omega:p=>Math.sqrt(p.k/p.mass),fields:[
     {key:'k',label:'Жёсткость',unit:'Н/м',min:5,max:200,step:1,def:20,d:0},
     {key:'mass',label:'Масса груза',unit:'кг',min:0.05,max:2,step:0.05,def:0.5,d:2},
     {key:'amp',label:'Амплитуда',unit:'см',min:1,max:SPRING_AMP_MAX,step:0.5,def:5,d:1},
   ]},
-  wave:{paint:paintWave,omega:p=>2*Math.PI/p.period,fields:[
+  wave:{paint:paintWave,init:clockInit,omega:p=>2*Math.PI/p.period,fields:[
     {key:'lambda',label:'Длина волны',unit:'м',min:0.5,max:3,step:0.1,def:2,d:1},
     {key:'period',label:'Период',unit:'с',min:0.5,max:5,step:0.1,def:2,d:1},
     {key:'amp',label:'Амплитуда',unit:'м',min:0.1,max:1,step:0.05,def:0.5,d:2},
   ]},
-  cylinder:{paint:paintCylinder,fields:[
+  cylinder:{paint:paintCylinder,init:cylinderInit,fields:[
     {key:'T',label:'Температура',unit:'К',min:100,max:1000,step:5,def:300,d:0},
     {key:'n',label:'Количество газа',unit:'моль',min:0.05,max:1,step:0.01,def:0.2,d:2},
     {key:'mass',label:'Масса поршня',unit:'кг',min:0,max:50,step:1,def:0,d:0,zero:'0 кг (невесомый)'},
@@ -64,16 +66,34 @@ const MODELS={
     {key:'p0',label:'Давление снаружи',unit:'кПа',min:0,max:200,step:5,def:100,d:0},
     {key:'h',label:'Высота поршня',unit:'м',min:CYL_MIN,max:CYL_H,step:0.01,def:0.5,d:2,when:p=>p.fixed},
   ]},
+  heater:{paint:paintHeater,init:p=>{p.on=false;},toggle:p=>{p.on=!p.on;},
+    runLabel:p=>p.on?'⏹ Выключить':'🔥 Включить',fields:[
+    {key:'power',label:'Мощность',unit:'Вт',min:50,max:5000,step:50,def:500,d:0},
+  ]},
+  body:{paint:paintBody,init:bodyInit,busy:bodyHeating,reset:bodyReset,onField:bodyField,fields:[
+    {key:'material',label:'Вещество',options:materialOptions,def:'water'},
+    {key:'mass',label:'Масса',unit:'г',k:1000,min:10,max:1000,step:10,def:0.1,d:0},
+    {key:'t0',label:'Начальная температура',unit:'°C',min:-30,max:bodyTempMax,step:1,def:-10,d:0},
+  ]},
+  calorimeter:{paint:paintCalorimeter,init:mixInit,busy:mixBusy,toggle:mixToggle,onField:mixField,
+    runLabel:p=>p.run?'⟲ Разделить заново':'▶ Смешать',fields:[
+    {key:'mat1',label:'Вещество 1',options:materialOptions,def:'water'},
+    {key:'m1',label:'Масса 1',unit:'г',min:10,max:1000,step:10,def:200,d:0},
+    {key:'t1',label:'Температура 1',unit:'°C',min:-30,max:500,step:1,def:20,d:0},
+    {key:'mat2',label:'Вещество 2',options:materialOptions,def:'copper'},
+    {key:'m2',label:'Масса 2',unit:'г',min:10,max:1000,step:10,def:100,d:0},
+    {key:'t2',label:'Температура 2',unit:'°C',min:-30,max:500,step:1,def:100,d:0},
+  ]},
 };
 
 function modelDefaults(kind){
   const m=MODELS[kind],p={};
   for(const f of m.fields)p[f.key]=f.def;
-  if(m.omega)return {...p,run:false,ph:0,at:0};
-  p.fixed=false;
-  p.h=pistonRest(p);
+  m.init(p);
   return p;
 }
+function clockInit(p){ p.run=false;p.ph=0;p.at=0; }
+function cylinderInit(p){ p.fixed=false;p.h=pistonRest(p); }
 const serverNow=()=>Date.now()+S.clock;
 function modelPhase(it){
   const p=it.props;
@@ -138,7 +158,8 @@ function modelTick(){
   let moving=false;
   for(const it of items){
     if(it.type!=='physics'||!MODELS[it.kind])continue;
-    let active=it.props.run;
+    const busy=MODELS[it.kind].busy;
+    let active=busy?busy(it):it.props.run;
     if(it.kind==='cylinder'&&it._h!=null&&it._h!==it.props.h){
       const d=it.props.h-it._h;
       it._h=Math.abs(d)<0.001?it.props.h:it._h+d*(1-Math.exp(-dt/PISTON_EASE));
@@ -156,9 +177,8 @@ function modelTick(){
    один человек, а смотрят на доску все. */
 const num=(v,d)=>v.toFixed(d).replace('.',',');
 const fontSize=it=>Math.max(7,Math.min(14,Math.min(it.w,it.h)*0.05));
-const captionH=(it,n)=>fontSize(it)*1.35*n+12;
-function caption(ctx,it,lines){
-  const fs=fontSize(it);
+const captionH=(it,n,fs=fontSize(it))=>fs*1.35*n+12;
+function caption(ctx,it,lines,fs=fontSize(it)){
   ctx.fillStyle='#1A1C20';ctx.textAlign='left';ctx.textBaseline='alphabetic';
   ctx.font=fs+'px ui-sans-serif,system-ui,sans-serif';
   lines.forEach((t,i)=>ctx.fillText(t,-it.w/2+10,it.h/2-8-(lines.length-1-i)*fs*1.35));
@@ -344,7 +364,8 @@ function paintCylinder(ctx,it){
    значения: пересборка выдернула бы ползунок из-под руки. */
 let panelRows=[];
 const activeModel=()=>selected&&selected.type==='physics'&&MODELS[selected.kind]?selected:null;
-const fieldText=(f,v)=>f.zero&&!v?f.zero:num(v,f.d)+' '+f.unit;
+const fieldText=(f,v)=>f.options?'':f.zero&&!v?f.zero:num(v*(f.k||1),f.d)+' '+f.unit;
+const bound=(v,p)=>typeof v==='function'?v(p):v;
 function renderModelPanel(it){
   const box=document.getElementById('physicsModelFields');
   box.innerHTML='';
@@ -355,16 +376,32 @@ function renderModelPanel(it){
     const val=document.createElement('span');
     val.style.color='var(--text)';
     head.append(f.label+' ',val);
-    const input=document.createElement('input');
-    input.type='range';input.min=f.min;input.max=f.max;input.step=f.step;
-    input.oninput=()=>modelEdit(it,p=>{p[f.key]=+input.value;});
+    const m=MODELS[it.kind];
+    const set=v=>modelEdit(it,p=>{p[f.key]=v;if(m.onField)m.onField(p,f.key);});
+    let input;
+    if(f.options){
+      input=document.createElement('select');
+      input.style.cssText='width:100%;background:var(--panel-2);color:var(--text);border:1px solid var(--edge);border-radius:6px;padding:6px';
+      for(const [value,title] of f.options()){
+        const o=document.createElement('option');
+        o.value=value;o.textContent=title;
+        input.appendChild(o);
+      }
+      input.onchange=()=>set(input.value);
+    }else{
+      input=document.createElement('input');
+      input.type='range';input.step=f.step;
+      input.oninput=()=>set(+input.value/(f.k||1));
+    }
     row.append(head,input);
     box.appendChild(row);
     return {f,row,val,input};
   });
-  const clock=!!MODELS[it.kind].omega;
-  document.getElementById('physModelClock').classList.toggle('hidden',!clock);
-  document.getElementById('physModelFixedRow').classList.toggle('hidden',clock);
+  const m=MODELS[it.kind],run=!!(m.omega||m.toggle),reset=!!(m.omega||m.reset);
+  document.getElementById('physModelRun').classList.toggle('hidden',!run);
+  document.getElementById('physModelReset').classList.toggle('hidden',!reset);
+  document.getElementById('physModelClock').classList.toggle('hidden',!run&&!reset);
+  document.getElementById('physModelFixedRow').classList.toggle('hidden',it.kind!=='cylinder');
   syncModelPanel(it);
 }
 function syncModelPanel(it){
@@ -372,10 +409,13 @@ function syncModelPanel(it){
   const p=it.props;
   for(const {f,row,val,input} of panelRows){
     row.classList.toggle('hidden',!!f.when&&!f.when(p));
-    input.value=p[f.key];
+    // сначала границы: за старой границей браузер обрезал бы новое значение
+    if(!f.options){input.min=bound(f.min,p);input.max=bound(f.max,p);}
+    input.value=f.options?p[f.key]:p[f.key]*(f.k||1);
     val.textContent=fieldText(f,p[f.key]);
   }
-  document.getElementById('physModelRun').textContent=p.run?'⏸ Пауза':'▶ Пуск';
+  const label=MODELS[it.kind].runLabel;
+  document.getElementById('physModelRun').textContent=label?label(p):p.run?'⏸ Пауза':'▶ Пуск';
   document.getElementById('physModelFixed').checked=!!p.fixed;
 }
 
@@ -389,11 +429,11 @@ export function __init() {
 setInterval(modelTick,33);
 document.getElementById('physModelRun').onclick=()=>{
   const it=activeModel();
-  if(it)modelEdit(it,p=>{p.run=!p.run;});
+  if(it)modelEdit(it,MODELS[it.kind].toggle||(p=>{p.run=!p.run;}));
 };
 document.getElementById('physModelReset').onclick=()=>{
   const it=activeModel();
-  if(it)modelEdit(it,p=>{p.run=false;p.ph=0;});
+  if(it)modelEdit(it,MODELS[it.kind].reset||(p=>{p.run=false;p.ph=0;}));
 };
 document.getElementById('physModelFixed').onchange=e=>{
   const it=activeModel();
@@ -404,5 +444,5 @@ document.getElementById('physModelFixed').onchange=e=>{
 
 /* Наружу — только то, что нужно соседям; остальное остаётся своим. */
 export {
-  MODELS, modelDefaults, paintModel, renderModelPanel, syncModelPanel,
+  MODELS, caption, captionH, fontSize, modelDefaults, num, paintModel, renderModelPanel, serverNow, syncModelPanel,
 };
