@@ -509,9 +509,13 @@ test('обычное занятие работает: штрих, правка, 
     if (!running()) { err = new Error('сервер упал' + (err ? ': ' + err.message : '')); await start(); }
     if (err) { failed++; console.log('✗ ' + t.name + '\n    ' + err.message); }
   }
+  // Сервер при остановке ещё дописывает снимки досок: пока он жив, папку не
+  // удалить. Да и уборка не должна решать судьбу выкладки, проверки уже прошли.
+  const gone = new Promise(ok => child.once('exit', ok));
   child.kill();
+  await Promise.race([gone, sleep(5000)]);
   mock.close();
-  fs.rmSync(DATA, { recursive: true, force: true, maxRetries: 3 });
+  try { fs.rmSync(DATA, { recursive: true, force: true, maxRetries: 3 }); } catch {}
   console.log(failed ? 'сервер: не прошло ' + failed + ' из ' + tests.length
                      : 'сервер: все ' + tests.length + ' проверок прошли');
   process.exit(failed ? 1 : 0);
