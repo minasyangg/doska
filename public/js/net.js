@@ -66,6 +66,8 @@ const net={
     ws.onclose=async ev=>{
       if(ev.code===4004){hideBoardLoader();setConn('off','Доска удалена');return;}
       if(ev.code===4003){hideBoardLoader();setConn('off','Доступ к доске закрыт');deniedScreen();return;}
+      if(ev.code===4008){hideBoardLoader();setConn('off','На доске нет свободных мест');
+        deniedScreen('На этой доске сейчас предельное число участников. Попробуйте зайти позже.');return;}
       /* 1006 — обрыв без кадра закрытия. Так браузер показывает и отказ
          сервера на рукопожатии (сессии нет — 401, сам код ответа странице не
          виден), и обычный обрыв: пропала сеть, телефон усыпил вкладку,
@@ -245,10 +247,9 @@ const net={
       case 'policy':S.anyEdit=!!m.anyEdit;break;
       // порядок слоёв поменял кто-то другой: переставляем у себя так же
       case 'z':applyZ(m.ids||[],m.to);drawBoard();break;
-      // доска упёрлась в потолок объектов. Раньше сервер молча выбрасывал
-      // самое старое, и начало занятия исчезало незаметно
-      case 'full':hint('Доска заполнена: '+(m.max||0).toLocaleString('ru')+
-        ' объектов. Заведите новую или сотрите лишнее');break;
+      // доска упёрлась в потолок. Раньше сервер молча выбрасывал самое
+      // старое, и начало занятия исчезало незаметно
+      case 'full':hint('Доска заполнена, новое не сохраняется. Заведите новую или сотрите лишнее');break;
       case 'denied':deniedScreen();break;
       case 'cursor':cursors.set(m.id,{x:m.x,y:m.y,t:performance.now()});drawLive();break;
       case 'view':{

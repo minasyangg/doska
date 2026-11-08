@@ -42,13 +42,44 @@ store.init(DIR);
 /* Потолок объектов на доску. Из окружения — чтобы проверять поведение на
    переполнении, не рисуя восемьдесят тысяч штрихов. */
 const MAX_ITEMS   = Math.max(10, +process.env.MAX_ITEMS || 80000);
+/* Точки — главный вес доски: один объект несёт их до двенадцати тысяч, и
+   потолка по объектам тут мало. Любой, кому можно писать, набирал гигабайт за
+   минуту, процесс упирался в память и обрывал все занятия разом. Четыре
+   миллиона — больше чем вдвое против самого тяжёлого замеренного занятия. */
+const MAX_POINTS  = Math.max(10, +process.env.MAX_POINTS || 4000000);
+/* Сколько человек на одной доске. Владельца потолок не касается: толпа по
+   гостевой ссылке не должна запирать преподавателя снаружи его же доски. */
+const MAX_PEERS   = Math.max(1, +process.env.MAX_PEERS || 50);
+/* Предохранитель на весь процесс: потолки выше — на доску, а досок много.
+   Меньше порога, по которому pm2 перезапускает процесс (600 МБ): лучше
+   сказать «доска заполнена», чем оборвать всех. */
+const MEM_LIMIT   = (+process.env.MEM_LIMIT_MB || 480) * 1024 * 1024;
+const DISK_RESERVE = 300 * 1024 * 1024;    // столько оставляем журналам занятий
 const MAX_UPLOAD  = 16 * 1024 * 1024;      // 16 МБ на картинку
 const SAVE_EVERY  = 4000;
 const IDLE_UNLOAD = 30 * 60 * 1000;
+const JOIN_TIMEOUT_MS = +process.env.JOIN_TIMEOUT_MS || 15000;
+const CAP_RECHECK_MS  = +process.env.CAP_RECHECK_MS || 60000;
 
 /* ═══════════════ вспомогательное ═══════════════ */
 const okId    = s => /^[a-zA-Z0-9_-]{1,40}$/.test(s);
 const rnd     = n => crypto.randomBytes(n * 2).toString('base64url').slice(0, n);
+const pointsOf = it => pt.isPacked(it.pts) ? pt.count(it.pts, pt.strideOf(it)) : 0;
+
+/* Имя попадает в журнал построчно, а scripts/day-report.js читает журнал как
+   данные: перевод строки в имени гостя дописал бы туда поддельный вход. */
+const cleanName = (v, max) =>
+  String(v == null ? '' : v).replace(/[\x00-\x1f\x7f\u2028\u2029]/g, ' ').trim().slice(0, max);
+
+/* Автор объекта. Поле by уходит всем участникам, и раньше в нём лежал сам
+   идентификатор: uid учётной записи или номер гостя. Номер гостя при этом
+   служил ему паролем: увидел чужой, зашёл заново с ним же — и стираешь чужое.
+   Теперь на проводе и на диске только отпечаток, свой на каждую доску: для
+   «моё / не моё» этого хватает, а обратно из него ничего не получить. Секрет
+   здесь не нужен, отпечаток ничего не открывает: кто ты, решает сессия. */
+const isAuthor = v => typeof v === 'string' && v.startsWith('a_');
+const authorOf = (roomId, uid) =>
+  'a_' + crypto.createHash('sha256').update(roomId + '|' + uid).digest('base64url').slice(0, 22);
 
 function reply(res, code, obj) {
   res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
@@ -125,9 +156,10 @@ async function loadRoomNow(id) {
        объектов. На занятии с 4500 объектами это вылилось в миллионы сравнений
        и задержку до 2.5 секунды — её и показал мониторинг. Теперь поиск
        мгновенный, а порядок слоёв по-прежнему держит сам массив. */
-    byId: new Map()
+    byId: new Map(),
+    points: 0
   };
-  for (const it of r.items) r.byId.set(it.id, it);
+  for (const it of r.items) { r.byId.set(it.id, it); r.points += pointsOf(it); }
 
   // До v4 поле by хранило идентификатор СОКЕТА, а не человека: после
   // переподключения автор терял права на собственные штрихи. Новых владельцев
@@ -137,6 +169,17 @@ async function loadRoomNow(id) {
     for (const it of r.items) it.by = r.ownerId || null;
     await store.snapshot(id, r);          // переписываем сразу, не полагаясь на журнал
     console.log('[' + id + '] содержимое переведено в v' + store.SNAP_V + ' (' + r.items.length + ' объектов)');
+  }
+
+  // Доски, написанные до появления отпечатков (см. authorOf). По виду значения,
+  // а не по версии снимка: в журнале могут лежать строки обоих поколений.
+  let renamed = 0;
+  for (const it of r.items) {
+    if (it.by != null && !isAuthor(it.by)) { it.by = authorOf(id, it.by); renamed++; }
+  }
+  if (renamed) {
+    await store.snapshot(id, r);
+    console.log('[' + id + '] авторы заменены отпечатками: ' + renamed);
   }
 
   rooms.set(id, r);
@@ -176,9 +219,36 @@ function applyMeta(r, row) {
   return r;
 }
 
+/* Вес доски уточняем здесь, а не на каждом стирании: при добавлении счётчик
+   растёт сразу, а обход заодно учитывает стёртое и прорежённое. */
+function weigh(r) {
+  if (r.weighed === (r.ver | 0)) return;
+  r.weighed = r.ver | 0;
+  let n = 0;
+  for (const it of r.items) n += pointsOf(it);
+  r.points = n;
+}
+
+let memTight = false, diskTight = false;
+
+async function checkDisk() {
+  try {
+    const s = await fsp.statfs(DATA_DIR);
+    // files == 0 там, где файловая система не считает файлы (Windows)
+    diskTight = s.bavail * s.bsize < DISK_RESERVE || (s.files > 0 && s.ffree < 5000);
+  } catch {}
+}
+setInterval(checkDisk, 30000).unref();
+checkDisk();
+
 setInterval(() => {
   const now = Date.now();
+  const m = process.memoryUsage();
+  const tight = m.heapUsed + m.external > MEM_LIMIT;
+  if (tight !== memTight) console.error('память: ' + (tight ? 'предел, новое не принимаем' : 'снова в норме'));
+  memTight = tight;
   for (const r of [...rooms.values()]) {
+    weigh(r);
     // снимок делается редко — только когда журнал перерос порог; в остальное
     // время это просто досброс накопленных строк
     store.maybeSnapshot(r.id, r).catch(() => {});
@@ -216,8 +286,42 @@ const MIME = {
   '.gif':'image/gif','.webp':'image/webp','.svg':'image/svg+xml','.ico':'image/x-icon'
 };
 const IMAGE_EXT = { 'image/png':'.png','image/jpeg':'.jpg','image/webp':'.webp','image/gif':'.gif' };
+/* Тип файла называет тот, кто его присылает. Проверяем по первым байтам, иначе
+   доска становится бесплатным хранилищем чего угодно под видом картинки. */
+const IMAGE_MAGIC = {
+  '.png':  b => b.length > 8 && b.readUInt32BE(0) === 0x89504e47,
+  '.jpg':  b => b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  '.gif':  b => b.toString('latin1', 0, 4) === 'GIF8',
+  '.webp': b => b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP',
+};
 
 const BOARD_QUOTA = 200 * 1024 * 1024;     // картинок на одну доску
+
+/* Заголовки защиты. Здесь, а не в Caddyfile: едут вместе с кодом, и новая
+   копия сервиса получит их сама. CSP — главное: посторонний скрипт на странице
+   не выполнится, даже если где-то пропустим экранирование.
+
+   Стили разрешены встроенные: разметка держит их в <style> и в атрибутах.
+   Скрипты — только свои файлы, встроенных в странице нет. */
+const CSP = [
+  "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:", "object-src 'none'", "base-uri 'none'",
+  "form-action 'self'", "frame-ancestors 'none'",
+].join('; ');
+
+function securityHeaders(req, res) {
+  const host = String(req.headers.host || '');
+  const secure = session.isSecure(req);
+  // 'self' в старых Safari не покрывает сокет, поэтому адрес называем явно
+  const sock = /^[A-Za-z0-9.:[\]-]+$/.test(host) ? ' ' + (secure ? 'wss://' : 'ws://') + host : '';
+  res.setHeader('content-security-policy', CSP + "; connect-src 'self'" + sock);
+  res.setHeader('x-content-type-options', 'nosniff');
+  res.setHeader('x-frame-options', 'DENY');
+  // в адресе доски лежит пропуск гостя — на чужие сайты он уходить не должен
+  res.setHeader('referrer-policy', 'same-origin');
+  res.setHeader('permissions-policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+  if (secure) res.setHeader('strict-transport-security', 'max-age=31536000');
+}
 
 /* Раз аутентификация переехала в куку, появился межсайтовый риск: чужая
    страница может послать запрос от имени вошедшего. SameSite=Lax закрывает
@@ -230,9 +334,58 @@ function crossSite(req) {
   return o !== 'http://' + req.headers.host && o !== 'https://' + req.headers.host;
 }
 
-const jsonBody = async req =>
-  JSON.parse((await readBody(req, 64 * 1024)).toString('utf8') || '{}');
+async function jsonBody(req) {
+  let v;
+  try { v = JSON.parse((await readBody(req, 64 * 1024)).toString('utf8') || '{}'); }
+  catch { throw Object.assign(new Error('плохой запрос'), { status: 400 }); }
+  if (!v || typeof v !== 'object' || Array.isArray(v))
+    throw Object.assign(new Error('плохой запрос'), { status: 400 });
+  return v;
+}
 const str = (v, max) => String(v == null ? '' : v).trim().slice(0, max);
+
+/* Настоящий адрес посетителя. За Caddy у каждого соединения адрес 127.0.0.1,
+   и счётчик ошибок входа был один на всех: пять опечаток от кого угодно
+   запирали вход всему сайту на четверть часа. Заголовки верим только за
+   прокси (TRUST_PROXY): порт приложения снаружи не виден, а X-Real-IP Caddy
+   выставляет сам, поверх присланного. */
+function clientIp(req) {
+  if (process.env.TRUST_PROXY === '1') {
+    const real = String(req.headers['x-real-ip'] || '').trim();
+    if (real) return real;
+    const chain = String(req.headers['x-forwarded-for'] || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (chain.length) return chain[chain.length - 1];
+  }
+  return req.socket.remoteAddress || '?';
+}
+
+/* Частота запросов, доступных без входа: ведро токенов на адрес. Запас с
+   расчётом на класс за одним адресом, заходящий по ссылке разом. Иначе
+   каждый вход гостя — файл сессии на диске и обращение к базе, и поток таких
+   запросов забивал бы и то и другое. */
+const hits = new Map();
+const HITS_MAX = 20000;
+function sweepHits() {
+  const old = Date.now() - 10 * 60 * 1000;
+  for (const [k, b] of hits) if (b.at < old) hits.delete(k);
+}
+setInterval(sweepHits, 10 * 60 * 1000).unref();
+
+function tooMany(req, name, perMin) {
+  const key = name + '|' + clientIp(req), now = Date.now();
+  let b = hits.get(key);
+  if (!b) {
+    if (hits.size >= HITS_MAX) sweepHits();
+    if (hits.size >= HITS_MAX) return false;    // карта полна — не повод отказывать всем
+    b = { n: perMin, at: now };
+    hits.set(key, b);
+  }
+  b.n = Math.min(perMin, b.n + (now - b.at) * perMin / 60000);
+  b.at = now;
+  if (b.n < 1) { metrics.inc('doska_rate_limited_total'); return true; }
+  b.n -= 1;
+  return false;
+}
 
 /* Попытки входа: свой счётчик, чтобы не выжигать общий лимит Supabase по IP
    (доска для него — один адрес на всех).
@@ -251,11 +404,14 @@ function sweepAttempts() {
 }
 setInterval(sweepAttempts, 10 * 60 * 1000).unref();
 
-function loginBlocked(key) {
+// На почту строже: это подбор пароля. С одного адреса могут входить многие.
+const LOGIN_PER_MAIL = 5, LOGIN_PER_IP = 20;
+
+function loginBlocked(key, max) {
   const a = attempts.get(key);
   if (!a) return 0;
   if (Date.now() > a.until) { attempts.delete(key); return 0; }
-  return a.n >= 5 ? Math.ceil((a.until - Date.now()) / 1000) : 0;
+  return a.n >= max ? Math.ceil((a.until - Date.now()) / 1000) : 0;
 }
 function loginFailed(key) {
   const a = attempts.get(key);
@@ -317,18 +473,21 @@ async function handleAuth(req, res, url, p) {
     const password = String(b.password || '');
     if (!email || !password) return reply(res, 400, { error: 'нужны почта и пароль' });
 
-    const ip = req.socket.remoteAddress || '?';
-    for (const key of [ip, email]) {
-      const wait = loginBlocked(key);
+    // приставки — чтобы почта «1.2.3.4» не считалась в счётчик чужого адреса
+    const ip = 'ip|' + clientIp(req), mail = 'mail|' + email;
+    for (const [key, max] of [[ip, LOGIN_PER_IP], [mail, LOGIN_PER_MAIL]]) {
+      const wait = loginBlocked(key, max);
       if (wait) return reply(res, 429, { error: 'слишком много попыток, подождите ' + wait + ' с' });
     }
     try {
       const tokens = await gotrue.signInWithPassword(email, password);
-      attempts.delete(ip); attempts.delete(email);
+      // счётчик адреса не сбрасываем: иначе вход в свой аккаунт между попытками
+      // обнулял бы перебор чужих
+      attempts.delete(mail);
       return startSession(req, res, tokens);
     } catch (e) {
       if (e.transport) return reply(res, 503, { error: 'сервис входа недоступен, попробуйте позже' });
-      loginFailed(ip); loginFailed(email);
+      loginFailed(ip); loginFailed(mail);
       return reply(res, 401, { error: 'неверная почта или пароль' });
     }
   }
@@ -392,10 +551,12 @@ async function handleSso(req, res, url, p) {
     как кука: <img> не умеет слать заголовки, а картинки тоже под защитой. */
 async function handleGuestEnter(req, res) {
   if (req.method !== 'POST') return reply(res, 405, { error: 'нужен POST' });
+  if (tooMany(req, 'guest', 120)) return reply(res, 429, { error: 'слишком много запросов, подождите минуту' });
+  if (diskTight) return reply(res, 503, { error: 'на сервере кончается место, попробуйте позже' });
   const b = await jsonBody(req);
   const boardId = str(b.board, 40);
   const token = str(b.g, 64);
-  const name = str(b.name, 24);
+  const name = cleanName(b.name, 24);
   if (!okId(boardId)) return reply(res, 400, { error: 'плохая ссылка' });
 
   // С токеном — по старой выданной ссылке; без токена — по самому адресу
@@ -588,19 +749,23 @@ async function handleUpload(req, res, url) {
   if (req.method !== 'POST') return reply(res, 405, { error: 'нужен POST' });
   const id = url.searchParams.get('board') || '';
   if (!okId(id)) return reply(res, 400, { error: 'плохой id доски' });
+  if (tooMany(req, 'upload', 240)) return reply(res, 429, { error: 'слишком много загрузок, подождите минуту' });
 
   const s = await session.fromRequest(req);
   const { cap } = await cap_.resolve(s, id);
+  // До комнаты: иначе запрос без всякого входа поднимал в памяти комнату с
+  // любым присланным id, а при выгрузке она ещё и писалась на диск
+  if (cap === 'none') return reply(res, 403, { error: 'нет доступа к доске' });
   // loadRoom, а не rooms.get: раньше загрузка отваливалась с 404 через полчаса
   // простоя комнаты, хотя доска никуда не девалась
   const room = await loadRoom(id);
   if (!cap_.mayEdit(cap, room.locked))
-    return reply(res, cap === 'none' ? 403 : 403,
-      { error: cap === 'none' ? 'нет доступа к доске' : 'доска закрыта преподавателем' });
+    return reply(res, 403, { error: 'доска закрыта преподавателем' });
 
   const type = (req.headers['content-type'] || '').split(';')[0].trim();
-  const ext = IMAGE_EXT[type];
+  const ext = Object.hasOwn(IMAGE_EXT, type) && IMAGE_EXT[type];
   if (!ext) return reply(res, 415, { error: 'поддерживаются PNG, JPEG, WebP, GIF' });
+  if (diskTight) return reply(res, 507, { error: 'на сервере кончается место' });
   if (await boardBytes(id) > BOARD_QUOTA)
     return reply(res, 507, { error: 'на доске кончилось место под картинки' });
 
@@ -608,6 +773,7 @@ async function handleUpload(req, res, url) {
   try { buf = await readBody(req, MAX_UPLOAD); }
   catch { return reply(res, 413, { error: 'картинка больше 16 МБ' }); }
   if (!buf.length) return reply(res, 400, { error: 'пустой файл' });
+  if (!IMAGE_MAGIC[ext](buf)) return reply(res, 415, { error: 'файл не похож на картинку' });
 
   const dir = path.join(DIR.files, id);
   await fsp.mkdir(dir, { recursive: true });
@@ -706,8 +872,22 @@ async function collectOrphanFiles(id) {
 const SITE_URL = (process.env.SITE_URL || '').replace(/\/+$/, '');
 const SITE_HOST = SITE_URL ? SITE_URL.replace(/^https?:\/\//, '') : '';
 
-const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, 'http://localhost');
+/* Обработчик асинхронный: всё, что вылетит мимо него, стало бы необработанным
+   отказом и завершило процесс. Поэтому страховка здесь, снаружи всего разбора. */
+const server = http.createServer((req, res) => {
+  route(req, res).catch(e => {
+    console.error(req.method, String(req.url).slice(0, 100), e.message);
+    if (!res.headersSent) res.writeHead(500);
+    res.end();
+  });
+});
+
+async function route(req, res) {
+  securityHeaders(req, res);
+  // «GET //» — законный запрос и незаконный адрес: разбор бросает исключение
+  let url;
+  try { url = new URL(req.url, 'http://localhost'); }
+  catch { res.writeHead(400); return res.end(); }
   const p = url.pathname;
 
   if (SITE_HOST) {
@@ -739,6 +919,7 @@ const server = http.createServer(async (req, res) => {
       if (p === '/api/board-entry') {
         const bid = url.searchParams.get('b') || '';
         if (!okId(bid)) return reply(res, 400, { error: 'плохой id' });
+        if (tooMany(req, 'entry', 120)) return reply(res, 429, { error: 'слишком много запросов' });
         let row = null;
         try { row = await db.guestOpenByLink(bid); }
         catch (e) { return reply(res, e.transport ? 503 : 400, { error: e.message }); }
@@ -786,14 +967,20 @@ const server = http.createServer(async (req, res) => {
   } catch (e) {
     const status = e.status && e.status >= 400 && e.status < 600 ? e.status : (e.transport ? 503 : 500);
     if (status >= 500) console.error(req.method, p, e.message);
-    return reply(res, status, { error: e.message || 'ошибка сервера' });
+    // подробности сбоя — в журнал; посетителю незачем читать внутренности
+    return reply(res, status, { error: status >= 500 ? 'сервис временно недоступен' : (e.message || 'ошибка') });
   }
 
   /* Метрики. Только с самой машины: по ним видно, сколько досок и насколько
-     они живые, — наружу такое не отдают. Сборщик ходит изнутри. */
+     они живые, — наружу такое не отдают. Сборщик ходит изнутри.
+
+     Адреса одного мало: за прокси любой запрос приходит с 127.0.0.1, и страница
+     была открыта всему интернету. Прокси всегда дописывает свои заголовки, а
+     сборщик ходит напрямую, без них. */
   if (p === '/metrics') {
     const from = req.socket.remoteAddress || '';
-    if (!/^(::1|::ffff:127\.|127\.)/.test(from)) { res.writeHead(403); return res.end(); }
+    const proxied = req.headers['x-forwarded-for'] || req.headers['x-real-ip'];
+    if (proxied || !/^(::1|::ffff:127\.|127\.)/.test(from)) { res.writeHead(403); return res.end(); }
     res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4; charset=utf-8',
                          'cache-control': 'no-store' });
     return res.end(metrics.render({ rooms, clients: wss.clients.size }));
@@ -825,7 +1012,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (!rec) { res.writeHead(404); return res.end('not found'); }
   return sendStatic(req, res, rec, ext);
-});
+}
 
 /* Отдача статики: кэш файла, сжатие и метка версии.
 
@@ -957,9 +1144,15 @@ const COLORS = ['#2F80ED','#EB5757','#27AE60','#9B51E0','#F2994A','#00A3A3','#D6
 let seq = 0;
 
 server.on('upgrade', async (req, socket, head) => {
+  // Пока читаем сессию, за сокетом никто не следит, и обрыв в этот момент
+  // стал бы необработанной ошибкой на весь процесс
+  socket.on('error', () => {});
   const host = req.headers.host, o = req.headers.origin;
   if (o && o !== 'http://' + host && o !== 'https://' + host) {
     socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy();
+  }
+  if (tooMany(req, 'ws', 240)) {
+    socket.write('HTTP/1.1 429 Too Many Requests\r\n\r\n'); return socket.destroy();
   }
   const s = await session.fromRequest(req).catch(() => null);
   if (!s) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); return socket.destroy(); }
@@ -1061,8 +1254,12 @@ function mayRelay(ws) {
    (ws.held — см. sendInit), сообщения не отправляются, а копятся и уходят
    следом за ней в том же порядке: иначе чужой штрих, нарисованный в эти
    миллисекунды, пришёл бы раньше доски и был бы ею же затёрт. */
+const MAX_BUFFERED = 32 * 1024 * 1024;
 function out(ws, s) {
   if (ws.readyState !== 1) return;
+  // Кто не читает, тот копит у нас в памяти всё, что ему шлют. Настоящий
+  // клиент на плохой связи переподключится и получит доску заново.
+  if (ws.bufferedAmount > MAX_BUFFERED) { ws.terminate(); return; }
   if (ws.held) ws.held.push(s); else ws.send(s);
 }
 const send = (ws, o) => out(ws, JSON.stringify(o));
@@ -1093,8 +1290,8 @@ const gzip = (buf) => new Promise((ok, no) =>
   zlib.gzip(buf, { level: INIT_GZIP_LEVEL }, (e, r) => e ? no(e) : ok(r)));
 
 function initHead(ws, room) {
-  // uid отдаём только самому себе: клиенту он нужен, чтобы понимать, какие
-  // объекты его собственные, а остальным участникам знать его незачем
+  // uid здесь — отпечаток автора (authorOf), а не учётная запись: клиенту он
+  // нужен, чтобы понимать, какие объекты его собственные
   // now — часы сервера: по ним у всех участников совпадает движение моделей
   return { t: 'init', you: { ...peerInfo(ws), uid: ws.me.uid }, now: Date.now(),
            title: room.title, locked: room.locked, anyEdit: room.anyEdit,
@@ -1391,7 +1588,14 @@ function cleanPhysics(o, by) {
    вместо тернарника в add/restore. Незарегистрированный тип (штрихи,
    а также будущие типы до появления своего cleaner'а) идёт через cleanStroke. */
 const CLEANERS = { image: cleanImage, shape: cleanShape, path: cleanPath, text: cleanText, arc: cleanArc, physics: cleanPhysics };
-const pick = type => CLEANERS[type] || cleanStroke;
+/* Только свои ключи. Тип присылает клиент: CLEANERS['constructor'] — это Object,
+   и объект проходил на доску как есть, без единой проверки, и оставался там
+   навсегда, ломая отрисовку у всех. */
+const pick = type => (typeof type === 'string' && Object.hasOwn(CLEANERS, type) && CLEANERS[type]) || cleanStroke;
+
+/** Места больше нет: потолок объектов, точек или памяти всего процесса. */
+const roomFull = (room, it) =>
+  memTight || room.items.length >= MAX_ITEMS || room.points + pointsOf(it) > MAX_POINTS;
 
 /* PATCHABLE[type] — какие поля можно менять через 'move'; PATCH_CLAMP[type][key] —
    как провалидировать/зажать присланное значение (get текущее it для отката). */
@@ -1505,6 +1709,10 @@ const PATCHABLE = Object.fromEntries(Object.entries(PATCH_CLAMP).map(([t, c]) =>
 wss.on('connection', (ws, req) => {
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
+  // Без этого слушателя кадр больше потолка или испорченный кадр становился
+  // необработанным исключением: библиотека сообщает о нём событием 'error',
+  // и процесс падал вместе со всеми занятиями. Сокет она закрывает сама.
+  ws.on('error', () => metrics.inc('doska_bad_messages_total'));
   ws.room = null;
   // sid — на сокет (курсоры, аватарки, две вкладки одного человека различимы),
   // uid — на человека: именно он попадает в поле by у объектов, поэтому
@@ -1512,9 +1720,14 @@ wss.on('connection', (ws, req) => {
   ws.me = { sid: 'u' + (++seq) + Date.now().toString(36).slice(-3), uid: null,
             name: 'Гость', cap: 'none', color: COLORS[seq % COLORS.length] };
   ws.relay = { n: RATE_BURST, at: Date.now() };   // ведро на ретрансляции
+  // Вошедший клиент шлёт join сразу. Без срока соединения, так и не зашедшие на
+  // доску, висели бы вечно и ничем не считались.
+  ws.joinTimer = setTimeout(() => { if (!ws.room && !ws.joining) ws.close(4000, 'нет входа'); }, JOIN_TIMEOUT_MS);
 
   ws.on('message', async raw => {
     let m; try { m = JSON.parse(raw); } catch { metrics.inc('doska_bad_messages_total'); return; }
+    // 'null' и '5' — тоже законный JSON, а дальше повсюду m.что-то
+    if (!m || typeof m !== 'object' || Array.isArray(m)) { metrics.inc('doska_bad_messages_total'); return; }
     const op = opLabel(m.t);
     /* Сколько занял разбор и рассылка одного сообщения. Замер — два вычитания,
        на рисование не влияет, зато лаги видно раньше, чем их заметит учитель.
@@ -1524,6 +1737,15 @@ wss.on('connection', (ws, req) => {
       ? null : metrics.timer('doska_op_seconds', { op });
     try {
       await handleMessage(ws, m);
+    } catch (e) {
+      /* Обработчик асинхронный: исключение становилось необработанным отказом
+         и завершало процесс. Поля сообщения присылает клиент, и достаточно
+         было одного кривого кадра от любого участника, чтобы оборвать все
+         занятия на сервере. В журнал — по разу на сокет, иначе поток мусора
+         превратился бы в поток строк на диске. */
+      metrics.inc('doska_bad_messages_total');
+      if (!ws.errLogged) { ws.errLogged = true; console.error('сообщение ' + op + ':', e.message); }
+      if (m.t === 'join' && !ws.room) ws.close(1011, 'не удалось войти');
     } finally {
       if (done) done();
       metrics.inc('doska_messages_total', 1, { op });
@@ -1532,21 +1754,29 @@ wss.on('connection', (ws, req) => {
 
   async function handleMessage(ws, m) {
     if (m.t === 'join') {
-      if (ws.room || !okId(String(m.room || ''))) return;
+      // joining — второй join не должен проскочить, пока первый ждёт базу: сокет
+      // оказался бы сразу в двух комнатах и из одной никогда бы не вышел
+      if (ws.room || ws.joining || !okId(String(m.room || ''))) return;
+      ws.joining = true;
       const id = String(m.room);
       const s = ws.session;
       const { cap, board } = await cap_.resolve(s, id);
       if (cap === 'none') { send(ws, { t: 'denied' }); ws.close(4003, 'нет доступа'); return; }
 
       const room = await loadRoom(id);
+      // Пока ждали базу и диск, человек мог уйти. Событие close уже отработало,
+      // и добавленный сейчас сокет остался бы в комнате призраком навсегда.
+      if (ws.readyState !== 1) return;
+      if (cap !== 'owner' && room.clients.size >= MAX_PEERS) { ws.close(4008, 'доска заполнена'); return; }
+      clearTimeout(ws.joinTimer);
       if (board) applyMeta(room, board);
       ws.room = room;
       ws.me.cap = cap;
-      ws.me.uid = s.kind === 'guest' ? s.guestId : s.uid;
+      ws.me.uid = authorOf(id, s.kind === 'guest' ? s.guestId : s.uid);
       // имя вошедшего берём из профиля mcko-app, а не с его слов
       ws.me.name = s.kind === 'user'
-        ? (s.fullName || s.email || 'Преподаватель').slice(0, 24)
-        : (String(m.name || s.name || 'Гость').trim().slice(0, 24) || 'Гость');
+        ? cleanName(s.fullName || s.email || 'Преподаватель', 24)
+        : (cleanName(m.name || s.name || 'Гость', 24) || 'Гость');
 
       room.clients.add(ws); room.touched = Date.now();
       // z — клиент умеет распаковать gzip и просит доску сжатой
@@ -1616,12 +1846,13 @@ wss.on('connection', (ws, req) => {
         // тысячи самых старых — то есть начало занятия исчезало, и человек
         // узнавал об этом, только пролистав наверх. Теперь доска не принимает
         // новое и говорит об этом: потерять написанное хуже, чем упереться.
-        if (room.items.length >= MAX_ITEMS) {
-          send(ws, { t: 'full', max: MAX_ITEMS });
+        if (roomFull(room, it)) {
+          send(ws, { t: 'full' });
           return;
         }
         room.items.push(it);
         room.byId.set(it.id, it);
+        room.points += pointsOf(it);
         const sent = pt.wire(it);
         record(room, { t: 'add', item: sent });
         broadcast(room, { t: 'add', item: sent }, ws);
@@ -1646,6 +1877,7 @@ wss.on('connection', (ws, req) => {
         }
         if (!Object.keys(applied).length) return;
         Object.assign(it, applied);
+        if (applied.pts) room.points += pt.count(applied.pts, pt.strideOf(it));   // точно посчитает weigh
         // заплатка тоже может нести точки — разворачиваем по шагу самого объекта
         const patch = pt.wire(applied, pt.strideOf(it));
         record(room, { t: 'move', id: it.id, ...patch });
@@ -1678,9 +1910,11 @@ wss.on('connection', (ws, req) => {
         if (!mayEdit || !Array.isArray(m.items)) return;
         const back = [];
         for (const src of m.items.slice(0, 800)) {
-          if (room.items.length >= MAX_ITEMS) { send(ws, { t: 'full', max: MAX_ITEMS }); break; }
+          if (!src || typeof src !== 'object') continue;
           const it = pick(src.type)(src, ws.me.uid);
-          if (it && !room.byId.has(it.id)) { room.items.push(it); room.byId.set(it.id, it); back.push(it); }
+          if (!it || room.byId.has(it.id)) continue;
+          if (roomFull(room, it)) { send(ws, { t: 'full' }); break; }
+          room.items.push(it); room.byId.set(it.id, it); room.points += pointsOf(it); back.push(it);
         }
         if (!back.length) return;
         const sentBack = back.map(i => pt.wire(i));
@@ -1754,6 +1988,7 @@ wss.on('connection', (ws, req) => {
         if (!owner) return;
         room.items = [];
         room.byId.clear();
+        room.points = 0;
         record(room, { t: 'clear' });
         broadcast(room, { t: 'cleared' });
         return;
@@ -1761,6 +1996,7 @@ wss.on('connection', (ws, req) => {
   }
 
   ws.on('close', () => {
+    clearTimeout(ws.joinTimer);
     const room = ws.room;
     if (!room) return;
     room.clients.delete(ws);
@@ -1879,7 +2115,7 @@ setInterval(async () => {
   for (let i = 0; i < list.length; i += CAP_BATCH) {
     await Promise.all(list.slice(i, i + CAP_BATCH).map(ws => recheckCap(ws)));
   }
-}, 60000);
+}, CAP_RECHECK_MS);
 
 /* На каком адресе слушать. По умолчанию все — так работает на своей машине и
    в проверках. За обратным прокси стоит указать 127.0.0.1: тогда порт доски
@@ -1891,6 +2127,11 @@ server.listen(PORT, HOST, () => {
   console.log('Доска: http://' + (HOST === '0.0.0.0' ? 'localhost' : HOST) + ':' + PORT);
   console.log('Данные: ' + DATA_DIR);
 });
+
+/* Последняя страховка. По умолчанию необработанный отказ обещания завершает
+   процесс, а с ним и все занятия; причины закрыты на границах (route и разбор
+   сообщений), а это на случай того, что там ещё не предусмотрено. */
+process.on('unhandledRejection', e => console.error('необработанный отказ:', (e && e.stack) || e));
 
 /* Выход по сигналу: дописываем журналы и снимаем снимки. Раньше здесь был
    синхронный по виду, но асинхронный по сути вызов persist — процесс успевал

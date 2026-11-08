@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --env-file=.env.dev.local server.js",
-    "check": "node --check server.js && node --experimental-vm-modules --no-warnings scripts/check-client.js"
+    "check": "node --check server.js && node --experimental-vm-modules --no-warnings scripts/check-client.js && node scripts/test-server.js"
   },
   "engines": {
     "node": ">=20.6"

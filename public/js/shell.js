@@ -106,10 +106,10 @@ function applyRole(){
 }
 /* Доступ отозвали посреди работы — честно сказать и увести, а не оставлять
    человека рисовать в пустоту. */
-function deniedScreen(){
+function deniedScreen(text){
   S.cap='none';S.boardId=null;net.close();
   showBoard(false);
-  grid.innerHTML='<div class="empty">Доступ к этой доске закрыт её владельцем.</div>';
+  grid.innerHTML='<div class="empty">'+(text||'Доступ к этой доске закрыт её владельцем.')+'</div>';
   window.history.replaceState(null,'','/');
 }
 function setConn(s,msg){
