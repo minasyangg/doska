@@ -27,6 +27,14 @@
    обычная длина урока LESSON_USUAL. Если действовал один, это не урок, а
    подготовка при чужой забытой вкладке: такое занятие не засчитывается.
 
+   Владельца в журнале может не быть: вход истёк, и преподаватель зашёл на
+   свою доску гостем (так было 9.11.2026). Признаки занятия при этом те же, а
+   пропустить урок хуже, чем неточно назвать участников. Поэтому двое без
+   владельца, работавшие вместе, — тоже занятие, с пометкой. Преподаватель в
+   таком занятии — тот, чьё имя похоже на имя владельца этой доски из прошлых
+   входов; если такого нет, то у кого больше всего правок. Считается только
+   там, где лог знает о действиях: одного присутствия двух гостей мало.
+
    Занятие считается от своего настоящего начала, даже если оно было вчера:
    иначе за полночь время отсчитывалось бы заново, и хвост от забытых вкладок
    снова становился занятием.
@@ -85,6 +93,7 @@ const BOOT = /^Доска: http/;          // сервер поднялся за
 const open = new Map();               // доска|имя → {n, from, cap}
 const spans = [];                     // {board, name, cap, from, to}
 const acts = new Map();               // доска → [{at, by: {имя: [правки, движения]}}]
+const knownOwner = new Map();         // доска → как звали владельца при последнем входе
 let trackedFrom = Infinity;           // с этого момента лог знает о действиях
 
 function close(key, at) {
@@ -104,6 +113,7 @@ for (const raw of fs.readFileSync(LOG, 'utf8').split('\n')) {
   let j;
   if ((j = JOIN.exec(text))) {
     const key = j[1] + '|' + j[2];
+    if (j[3] === 'owner') knownOwner.set(j[1], j[2]);
     const o = open.get(key);
     if (o) { o.n++; if (j[3] === 'owner') o.cap = 'owner'; }
     else open.set(key, { n: 1, from: at, cap: j[3] });
@@ -147,6 +157,16 @@ function intersect(a, b) {
   }
   return out;
 }
+
+/** Когда вместе были хотя бы двое разных людей (у каждого — свой список отрезков). */
+function twoOrMore(perPerson) {
+  const out = [];
+  perPerson.forEach((a, i) => { for (const b of perPerson.slice(i + 1)) out.push(...intersect(a, b)); });
+  return merge(out, 0);
+}
+const words = s => s.toLowerCase().replace(/ё/g, 'е').split(/\s+/).filter(w => w.length > 2);
+/** Гость назвался частью имени владельца: «Мария» на доске Ивановой Марии. */
+const sameName = (a, b) => words(a).some(w => words(b).includes(w));
 
 /** Когда на доске что-то делали (who — только этот человек). Время, о котором
     лог ещё не знал, считается занятым: иначе старые дни опустели бы целиком. */
@@ -217,23 +237,42 @@ for (const [board, list] of byBoard) {
   const teacherTime = merge(owners.flatMap(([, p]) => p.spans), RECONNECT);
 
   const together = intersect(teacherTime, merge(students.flatMap(([, p]) => p.spans), RECONNECT));
-  const pieces = intersect(together, busyTime(board));
   const everyone = [...people.keys()];
-  const found = toLessons(pieces).filter(l => {
+  const confirmed = pieces => toLessons(pieces).filter(l => {
     if (l.to - l.from < MIN_LESSON) return false;
     if (l.to - l.from <= LESSON_MAX || l.from < trackedFrom) return true;
     return everyone.filter(n => tally(board, [n], l).some(Boolean)).length >= 2;
   }).map(l => l.to - l.from > LESSON_MAX ? { from: l.from, to: l.from + LESSON_USUAL } : l)
     .map(clip).filter(l => l.to > l.from);
-  for (const l of found) {
-    const who = students.filter(([, p]) => intersect(merge(p.spans, RECONNECT), [l]).length).map(([n]) => n);
+  const found = confirmed(intersect(together, busyTime(board)));
+
+  const present = l => students.filter(([, p]) => intersect(merge(p.spans, RECONNECT), [l]).length).map(([n]) => n);
+  const add = (l, teacher, leads, who, note) => {
     const live = [...stillHere].some(k => k.startsWith(board + '|')) && l.to >= dayEnd - LESSON_GAP;
-    lessons.push({ board, title: boardTitle(board), teacher: owners.map(([n]) => n).join(', '),
+    lessons.push({ board, title: boardTitle(board), teacher, note,
                    from: l.from, to: l.to, live, students: who,
                    tracked: l.from >= trackedFrom,
-                   byTeacher: tally(board, owners.map(([n]) => n), l), byStudents: tally(board, who, l) });
+                   byTeacher: tally(board, leads, l), byStudents: tally(board, who, l) });
+  };
+  const ownerNames = owners.map(([n]) => n);
+  for (const l of found) add(l, ownerNames.join(', '), ownerNames, present(l));
+
+  // Вместе, но без владельца: см. начало файла
+  const known = knownOwner.get(board);
+  const guestLessons = confirmed(intersect(twoOrMore(students.map(([, p]) => merge(p.spans, RECONNECT))), busyTime(board)))
+    .filter(l => l.from >= trackedFrom && !found.some(f => f.from < l.to && l.from < f.to));
+  for (const l of guestLessons) {
+    const here = present(l);
+    if (!here.length) continue;
+    const alike = known ? here.filter(n => sameName(n, known)) : [];
+    const lead = [...(alike.length ? alike : here)]
+      .sort((a, b) => tally(board, [b], l)[0] - tally(board, [a], l)[0])[0];
+    add(l, known || lead, [lead], here.filter(n => n !== lead), alike.length
+      ? `⚠️ учитель вошёл как гость под именем «${lead}»`
+      : `⚠️ учитель вошёл как гость, имя не опознано: больше всего правок у «${lead}»`);
   }
-  if (!found.length) {
+
+  if (!found.length && !guestLessons.length) {
     for (const [name, p] of people) {
       // заглянул на пару секунд — не заход, а шум: открыл не ту доску и ушёл
       const here = merge(p.spans.map(clip).filter(s => s.to > s.from), RECONNECT);
@@ -241,7 +280,8 @@ for (const [board, list] of byBoard) {
         .filter(s => s.to - s.from >= MIN_VISIT);
       if (!ss.length) continue;
       const live = stillHere.has(board + '|' + name);
-      visits.push({ board, title: boardTitle(board), name, owner: p.cap === 'owner', from: ss[0].from,
+      visits.push({ board, title: boardTitle(board), name, from: ss[0].from,
+                    owner: p.cap === 'owner' || !!(known && sameName(name, known)),
                     ranges: ss.map((s, k) => range(s.from, s.to, live && k === ss.length - 1 && s.to >= dayEnd - LESSON_GAP)) });
     }
   }
@@ -274,6 +314,7 @@ if (!lessons.length) {
     const quiet = !l.byStudents[0] && !l.byStudents[1];
     out.push(`   правок на доске: преподаватель ${l.byTeacher[0]}, ${l.students.length > 1 ? 'ученики' : 'ученик'} ${l.byStudents[0]}` +
              (quiet ? ' · ⚠️ ученик ничего не делал на доске' : ''));
+    if (l.note) out.push('   ' + l.note);
   });
   const total = lessons.reduce((s, l) => s + (l.to - l.from), 0);
   out.push('', `Итого: ${lessons.length} ${plural(lessons.length, 'занятие', 'занятия', 'занятий')}, ${dur(total)}`);
